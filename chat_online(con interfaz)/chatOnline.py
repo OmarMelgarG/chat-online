@@ -1,0 +1,110 @@
+from flask import Flask, render_template_string
+from flask_socketio import SocketIO, send
+
+app = Flask(__name__)
+# Permitimos que cualquier dispositivo de la red se conecte
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# --- INTERFAZ PROFESIONAL INTEGRADA ---
+HTML_DISENO = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Institucional</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        :root { --primary: #2563eb; --bg: #f3f4f6; }
+        body { background: var(--bg); font-family: 'Segoe UI', sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .chat-card { width: 90%; max-width: 450px; height: 80vh; background: white; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); display: flex; flex-direction: column; overflow: hidden; }
+        .header { background: var(--primary); color: white; padding: 15px; text-align: center; font-weight: bold; font-size: 1.2rem; }
+        #messages { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 8px; background: #fafafa; }
+        .msg { padding: 8px 12px; border-radius: 8px; max-width: 80%; font-size: 0.95rem; line-height: 1.4; position: relative; }
+        .other { background: #e5e7eb; align-self: flex-start; color: #1f2937; }
+        .own { background: #dbeafe; align-self: flex-end; color: #1e40af; }
+        .sender-name { font-size: 0.7rem; font-weight: bold; display: block; margin-bottom: 2px; opacity: 0.8; }
+        .controls { display: flex; padding: 15px; gap: 10px; border-top: 1px solid #eee; }
+        input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 6px; outline: none; }
+        button { background: var(--primary); color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; }
+        .screen { display: none; flex-direction: column; height: 100%; }
+        .active { display: flex; }
+    </style>
+</head>
+<body>
+    <div class="chat-card">
+        <!-- Pantalla de Login -->
+        <div id="login" class="screen active" style="justify-content: center; padding: 40px; text-align: center;">
+            <h2 style="color: var(--primary)">Bienvenido al Chat</h2>
+            <input type="text" id="username" placeholder="Escribe tu nombre..." style="margin-bottom: 20px;">
+            <button onclick="conectar()">Entrar al Chat</button>
+        </div>
+
+        <!-- Pantalla de Chat -->
+        <div id="chat-ui" class="screen">
+            <div class="header">Chat en Tiempo Real</div>
+            <div id="messages"></div>
+            <div class="controls">
+                <input type="text" id="msgInput" placeholder="Escribe un mensaje..." onkeypress="if(event.key==='Enter') enviar()">
+                <button onclick="enviar()">Enviar</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let miNombre = "";
+
+        function conectar() {
+            const nom = document.getElementById('username').value.trim();
+            if(nom) {
+                miNombre = nom;
+                document.getElementById('login').classList.remove('active');
+                document.getElementById('chat-ui').classList.add('active');
+                // Avisamos al servidor
+                socket.send(miNombre + " se ha unido al chat");
+            }
+        }
+
+        function enviar() {
+            const input = document.getElementById('msgInput');
+            if(input.value.trim()) {
+                socket.send(miNombre + ": " + input.value);
+                input.value = "";
+            }
+        }
+
+        socket.on('message', function(msg) {
+            const container = document.getElementById('messages');
+            const div = document.createElement('div');
+            
+            const esMio = msg.startsWith(miNombre + ":");
+            div.className = 'msg ' + (esMio ? 'own' : 'other');
+
+            if(!esMio && msg.includes(':')) {
+                const [user, ...texto] = msg.split(':');
+                div.innerHTML = `<span class="sender-name">${user}</span> ${texto.join(':')}`;
+            } else {
+                div.textContent = msg.replace(miNombre + ": ", "");
+            }
+
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        });
+    </script>
+</body>
+</html>
+"""
+
+@app.route('/')
+def index():
+    return render_template_string(HTML_DISENO)
+
+@socketio.on('message')
+def handle_message(msg):
+    print(f"Mensaje Global: {msg}")
+    send(msg, broadcast=True) # Reenvía a todos (Web y Python)
+
+if __name__ == '__main__':
+    # Pon aquí tu IP local para que otros la vean o usa 0.0.0.0
+    socketio.run(app, host="0.0.0.0", port=5000, debug=True)
