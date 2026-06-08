@@ -371,7 +371,7 @@ def enviarTelegram(mensaje):
 
     url = (
         f"https://api.telegram.org/bot"
-        f"{8750865535:AAGHiPBQ7H_xsJDUIP55DvPB2v41G5xiLOg}/sendMessage"
+        f"{tokenTelegram}/sendMessage"
     )
 
     data = {
