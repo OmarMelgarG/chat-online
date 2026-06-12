@@ -18,8 +18,8 @@ import os
 # CONFIGURACION TELEGRAM
 
 
-tokenTelegram = os.getenv.TOKEN_TELEGRAM
-chatID = os.getenv.CHAT_ID
+tokenTelegram = os.getenv("TOKEN_TELEGRAM")
+chatID = os.getenv("CHAT_ID")
 
 
 eventlet.monkey_patch()
@@ -36,7 +36,8 @@ app = Flask(__name__)
 
 socket = SocketIO(
     app,
-    cors_allowed_origins="*"
+    cors_allowed_origins="*",
+    async_mode="eventlet"
 )
 
 
