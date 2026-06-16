@@ -44,5 +44,9 @@ def iniciarServidor():
         hilo=threading.Thread(target=manejarCliente,args=(cliente,))
         hilo.start()
 
+<<<<<<< HEAD
 iniciarServidor()
 
+=======
+iniciarServidor()
+>>>>>>> 54eb5fe (Apply chatOnline styles to trabajoFinal.py)

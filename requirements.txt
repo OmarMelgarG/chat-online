@@ -1,5 +1,13 @@
+<<<<<<< HEAD
 Flask==3.1.1
 Flask-SocketIO==5.6.1
 python-telegram-bot==22.7
 requests==2.32.3
 eventlet==0.41.0
+=======
+Flask==3.1.1
+Flask-SocketIO==5.6.1
+python-telegram-bot==22.7
+requests==2.32.3
+eventlet==0.41.0
+>>>>>>> 54eb5fe (Apply chatOnline styles to trabajoFinal.py)
