@@ -362,6 +362,59 @@ def crear_cliente_huggingface():
 def describir_modelo_huggingface(modelo):
     return modelo or 'modelo recomendado automatico de Hugging Face'
 
+def mensaje_hf_tiene_texto_visible(mensaje):
+    contenido = getattr(mensaje, 'content', None)
+
+    if isinstance(contenido, str) and contenido.strip():
+        return True
+
+    if isinstance(contenido, list):
+        for parte in contenido:
+            if isinstance(parte, dict):
+                texto = parte.get('text') or parte.get('content')
+            else:
+                texto = getattr(parte, 'text', None) or getattr(parte, 'content', None)
+
+            if isinstance(texto, str) and texto.strip():
+                return True
+
+    return False
+
+def respuesta_hf_solo_razonamiento(respuesta):
+    try:
+        mensaje = respuesta.choices[0].message
+    except Exception:
+        return False
+
+    razonamiento = getattr(mensaje, 'reasoning', None)
+    return bool(isinstance(razonamiento, str) and razonamiento.strip() and not mensaje_hf_tiene_texto_visible(mensaje))
+
+def construir_mensajes_tutor(pregunta, respuesta_directa=False):
+    system_prompt = (
+        'Eres un Tutor Académico Formal y Profesional. '
+        'Responde siempre en español con claridad, precisión y tono ejecutivo. '
+        'Explica conceptos de forma estructurada y mantén la respuesta breve. '
+        'No muestres razonamiento interno ni pasos de análisis; entrega solo la respuesta final.'
+    )
+
+    user_prompt = pregunta.strip()
+    if respuesta_directa:
+        user_prompt = (
+            'Responde únicamente con la respuesta final en español, sin razonamiento, borradores ni análisis. '
+            f'Consulta: {pregunta.strip()}'
+        )
+
+    return [
+        {
+            'role': 'system',
+            'content': system_prompt,
+        },
+        {
+            'role': 'user',
+            'content': user_prompt,
+        }
+    ]
+
 def extraer_texto_chat_completion(respuesta):
     try:
         mensaje = respuesta.choices[0].message
@@ -456,33 +509,12 @@ def consultar_tutor_ia(pregunta):
     print(f"[DEBUG] consultar_tutor_ia llamado con: {pregunta[:50]}...")
     print(f"[DEBUG] hf_token disponible: {bool(huggingface_api_token)}")
     print(f"[DEBUG] hf_model: {huggingface_model}")
-    
-    prompt = (
-        "Eres un Tutor Académico Formal y Profesional. "
-        "Responde en español con claridad, precisión y un tono ejecutivo. "
-        "Explica conceptos de manera estructurada y mantén la respuesta breve. "
-        f"Consulta: {pregunta}"
-    )
 
     if not huggingface_api_token:
         return "El tutor de IA no está disponible. Falta configurar la variable HUGGINGFACE_API_TOKEN en Render."
 
     client = crear_cliente_huggingface()
-    mensajes = [
-        {
-            'role': 'system',
-            'content': (
-                'Eres un Tutor Académico Formal y Profesional. '
-                'Responde siempre en español con claridad, precisión y tono ejecutivo. '
-                'Explica conceptos de forma estructurada y mantén la respuesta breve. '
-                'No muestres razonamiento interno ni pasos de análisis; entrega solo la respuesta final.'
-            )
-        },
-        {
-            'role': 'user',
-            'content': prompt
-        }
-    ]
+    mensajes = construir_mensajes_tutor(pregunta)
     errores_modelo = []
 
     for modelo in obtener_modelos_huggingface():
@@ -494,6 +526,16 @@ def consultar_tutor_ia(pregunta):
                 max_tokens=400,
                 temperature=0.3,
             )
+
+            if respuesta_hf_solo_razonamiento(respuesta):
+                print(f"[DEBUG] HF devolvio solo razonamiento con {describir_modelo_huggingface(modelo)}. Reintentando con instruccion mas directa.")
+                respuesta = client.chat_completion(
+                    model=modelo,
+                    messages=construir_mensajes_tutor(pregunta, respuesta_directa=True),
+                    max_tokens=900,
+                    temperature=0.2,
+                )
+
             return extraer_texto_chat_completion(respuesta)
 
         except InferenceTimeoutError as e:
