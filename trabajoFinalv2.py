@@ -3,6 +3,7 @@ from flask_socketio import SocketIO, send
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
+    CommandHandler,
     MessageHandler,
     filters,
     ContextTypes
@@ -20,6 +21,8 @@ import os
 
 tokenTelegram = os.getenv('TOKEN_TELEGRAM')
 chatID = os.getenv('CHAT_ID')
+gemini_api_key = os.getenv('GEMINI_API_KEY')
+gemini_model = os.getenv('GEMINI_MODEL', 'gemini-1.5-lite')
 
 #PALABRAS CLAVE DE ACTIVACION
 palabrasClave={
@@ -73,280 +76,366 @@ def index():
 <head>
 
 <meta charset="UTF-8">
-
-<meta name="viewport"
-content="width=device-width, initial-scale=1.0">
-
-<title>Chat Tiempo Real</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chat de Estudio Inteligente</title>
 
 <style>
-
-body{
-    font-family:Arial;
-    background:#f2f2f2;
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    height:100vh;
-    margin:0;
+:root {
+    color-scheme: dark;
+    --bg: #f4f7fb;
+    --panel: #ffffff;
+    --surface: #e5eaf4;
+    --surface-dark: #d1d9e6;
+    --text: #1b2330;
+    --muted: #596277;
+    --primary: #0f3d7c;
+    --accent: #0066cc;
+    --success: #0a6b4a;
+    --danger: #c4303b;
+    --border: rgba(27, 35, 48, 0.12);
 }
 
-.chat-container{
-    width:95%;
-    max-width:450px;
-    background:white;
-    border-radius:10px;
-    overflow:hidden;
-    box-shadow:0 0 10px rgba(0,0,0,0.2);
+* {
+    box-sizing: border-box;
 }
 
-.chat-header{
-    background:#007bff;
-    color:white;
-    padding:15px;
-    text-align:center;
-    font-size:20px;
-    font-weight:bold;
+body {
+    margin: 0;
+    font-family: Inter, Arial, sans-serif;
+    background: linear-gradient(180deg, #eef2f8 0%, #f7fbff 100%);
+    color: var(--text);
 }
 
-#chat{
-    height:400px;
-    overflow-y:auto;
-    padding:10px;
-    background:#fafafa;
+.page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
 }
 
-.mensaje{
-    background:#e4e6eb;
-    padding:10px;
-    border-radius:10px;
-    margin-bottom:10px;
-    word-wrap:break-word;
+.panel {
+    width: min(1080px, 100%);
+    background: var(--panel);
+    border-radius: 24px;
+    box-shadow: 0 36px 80px rgba(15, 61, 124, 0.08);
+    overflow: hidden;
+    border: 1px solid rgba(15, 61, 124, 0.08);
 }
 
-.emergencia{
-    background:#ff4d4d;
-    color:white;
-    font-weight:bold;
+.header {
+    background: #0f3d7c;
+    color: white;
+    padding: 30px 34px;
 }
 
-.controls{
-    padding:10px;
-    border-top:1px solid #ddd;
+.header-title {
+    margin: 0;
+    font-size: 1.85rem;
+    letter-spacing: -0.02em;
 }
 
-.input-group{
-    display:flex;
-    gap:10px;
-    margin-bottom:10px;
+.header-subtitle {
+    margin: 10px 0 0;
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 1rem;
+    max-width: 620px;
+    line-height: 1.6;
 }
 
-input{
-    flex:1;
-    padding:10px;
-    border:1px solid #ccc;
-    border-radius:5px;
+.body-grid {
+    display: grid;
+    grid-template-columns: 1fr;
 }
 
-button{
-    padding:10px 15px;
-    border:none;
-    background:#007bff;
-    color:white;
-    border-radius:5px;
-    cursor:pointer;
+.chat-panel {
+    padding: 28px;
 }
 
-button:hover{
-    background:#0056b3;
+.status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 22px;
 }
 
-#btn-entrar{
-    background:#28a745;
+.status-card {
+    width: 100%;
+    border-radius: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 18px 22px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
-#btn-entrar:hover{
-    background:#1e7e34;
+.status-card strong {
+    color: var(--primary);
 }
 
+.chat-window {
+    border-radius: 24px;
+    background: var(--surface);
+    min-height: 460px;
+    max-height: 620px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+}
+
+.chat-history {
+    padding: 24px;
+    overflow-y: auto;
+    gap: 14px;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.message {
+    display: inline-flex;
+    max-width: 80%;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.6;
+    padding: 16px 18px;
+    border-radius: 18px;
+    border: 1px solid transparent;
+}
+
+.message.user {
+    background: #ffffff;
+    color: var(--text);
+    align-self: flex-end;
+    border-color: rgba(15, 61, 124, 0.08);
+}
+
+.message.telegram {
+    background: #eef2ff;
+    color: var(--text);
+    border-color: rgba(0, 102, 204, 0.16);
+    align-self: flex-start;
+}
+
+.message.tutor {
+    background: #0f3d7c;
+    color: white;
+    border-color: rgba(255, 255, 255, 0.18);
+    align-self: flex-start;
+}
+
+.message.system {
+    background: #f5f7fb;
+    color: var(--muted);
+    border-radius: 14px;
+    align-self: center;
+    font-size: 0.95rem;
+}
+
+.message .badge {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 10px;
+    font-size: 0.82rem;
+    opacity: 0.88;
+}
+
+.message .badge span {
+    display: inline-flex;
+}
+
+.input-area {
+    padding: 20px 24px 24px;
+    background: #f6f8fb;
+    border-top: 1px solid var(--border);
+}
+
+.input-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+}
+
+.input-row input {
+    width: 100%;
+    border: 1px solid rgba(15, 61, 124, 0.16);
+    border-radius: 16px;
+    padding: 16px 18px;
+    font-size: 1rem;
+    background: white;
+    color: var(--text);
+}
+
+.input-row button {
+    border: none;
+    border-radius: 16px;
+    background: var(--accent);
+    color: white;
+    padding: 0 26px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.input-row button:hover {
+    background: #004ea1;
+    transform: translateY(-1px);
+}
+
+.note {
+    margin-top: 16px;
+    color: var(--muted);
+    font-size: 0.92rem;
+}
+
+@media (max-width: 720px) {
+    .panel { border-radius: 18px; }
+    .chat-window { min-height: 520px; }
+}
 </style>
 
 </head>
 
 <body>
 
-<div class="chat-container">
+<div class="page">
+    <section class="panel">
+        <header class="header">
+            <h1 class="header-title">Chat de Estudio Inteligente</h1>
+            <p class="header-subtitle">Asistente de estudio profesional para la web y Telegram. Usa <strong>/tutor</strong> para pedir explicaciones académicas formales al tutor.</p>
+        </header>
 
-<div class="chat-header">
-Chat Tiempo Real
-</div>
+        <div class="body-grid">
+            <div class="chat-panel">
+                <div class="status-bar">
+                    <div class="status-card">
+                        <div>
+                            <strong>Modo Tutor:</strong> disponible para consultas académicas.
+                        </div>
+                        <div id="statusText">Escribe /tutor seguido de tu pregunta.</div>
+                    </div>
+                </div>
 
-<div id="chat"></div>
+                <div class="chat-window">
+                    <div id="chat" class="chat-history"></div>
+                </div>
 
-<div class="controls">
-
-<div class="input-group">
-
-<input
-type="text"
-id="nombre"
-placeholder="Tu nombre">
-
-<button
-id="btn-entrar"
-onclick="guardarNombre()">
-Entrar
-</button>
-
-</div>
-
-<div class="input-group">
-
-<input
-type="text"
-id="mensaje"
-placeholder="Escribe un mensaje">
-
-<button onclick="enviar()">
-Enviar
-</button>
-
-</div>
-
-</div>
-
+                <div class="input-area">
+                    <div class="input-row">
+                        <input type="text" id="nombre" placeholder="Tu nombre" autocomplete="off" />
+                        <button id="btn-entrar" onclick="guardarNombre()">Entrar</button>
+                    </div>
+                    <div class="input-row" style="margin-top: 12px;">
+                        <input type="text" id="mensaje" placeholder="Escribe un mensaje o /tutor explica ..." autocomplete="off" />
+                        <button onclick="enviar()">Enviar</button>
+                    </div>
+                    <p class="note">El tutor de IA responde aquí y también envía la misma explicación al chat de Telegram.</p>
+                </div>
+            </div>
+        </div>
+    </section>
 </div>
 
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-
 <script>
 
 var socket = io();
 var nombre = "";
 
-function guardarNombre(){
+function guardarNombre() {
+    let input = document.getElementById("nombre");
 
-    let input =
-    document.getElementById("nombre");
-
-    if(input.value.trim()==""){
-
+    if (input.value.trim() == "") {
         alert("Ingrese nombre");
         return;
     }
 
-    nombre = input.value;
-
+    nombre = input.value.trim();
     input.disabled = true;
-
-    document.getElementById(
-        "btn-entrar"
-    ).disabled = true;
-
-    agregarSistema(
-        nombre + " se unió al chat"
-    );
+    document.getElementById("btn-entrar").disabled = true;
+    agregarSistema(nombre + " se unió al chat");
 }
 
-function enviar(){
+function enviar() {
+    let input = document.getElementById("mensaje");
+    let mensaje = input.value.trim();
 
-    let input =
-    document.getElementById(
-        "mensaje"
-    );
-
-    let mensaje =
-    input.value;
-
-    if(nombre==""){
-
-        alert(
-            "Ingrese nombre"
-        );
+    if (nombre == "") {
+        alert("Ingrese nombre");
         return;
     }
 
-    if(mensaje.trim()==""){
+    if (mensaje == "") {
         return;
     }
 
-    socket.send(
-        nombre + ": " + mensaje
-    );
+    if (mensaje.toLowerCase().startsWith('/tutor')) {
+        socket.emit('tutor_query', mensaje);
+        showTutorStatus('El tutor de IA está analizando tu consulta...');
+        agregarChat('Tu consulta se está enviando al tutor de IA...', 'system');
+    } else {
+        socket.send(nombre + ': ' + mensaje);
+    }
 
-    input.value="";
+    input.value = "";
 }
 
-socket.on(
-    "message",
-    function(msg){
+socket.on('message', function(msg) {
+    agregarChat(msg, 'user');
+});
 
-        agregarChat(msg);
+socket.on('telegram_message', function(msg) {
+    agregarChat('📲 ' + msg, 'telegram');
+});
+
+socket.on('emergencia', function(msg) {
+    agregarChat('🚨 ' + msg, 'telegram');
+});
+
+socket.on('tutor_status', function(msg) {
+    showTutorStatus(msg);
+});
+
+socket.on('tutor_response', function(msg) {
+    hideTutorStatus();
+    agregarChat('🤖 Tutor IA: ' + msg, 'tutor');
+});
+
+function agregarChat(msg, tipo) {
+    var chat = document.getElementById('chat');
+    var div = document.createElement('div');
+    div.className = 'message ' + (tipo || 'user');
+
+    if (tipo === 'tutor') {
+        div.innerHTML = '<div class="badge">🤖 <strong>Tutor IA</strong></div>' + msg;
+    } else if (tipo === 'telegram') {
+        div.innerHTML = '<div class="badge">📲 <strong>Telegram</strong></div>' + msg;
+    } else if (tipo === 'system') {
+        div.className = 'message system';
+        div.innerHTML = msg;
+    } else {
+        div.innerHTML = msg;
     }
-);
-
-socket.on(
-    "telegram_message",
-    function(msg){
-
-        agregarChat(
-            "📲 " + msg
-        );
-    }
-);
-
-socket.on(
-    "emergencia",
-    function(msg){
-
-        agregarEmergencia(msg);
-    }
-);
-
-function agregarChat(msg){
-
-    let chat =
-    document.getElementById("chat");
-
-    let div =
-    document.createElement("div");
-
-    div.className="mensaje";
-
-    div.innerHTML=msg;
 
     chat.appendChild(div);
-
-    chat.scrollTop =
-    chat.scrollHeight;
+    chat.scrollTop = chat.scrollHeight;
 }
 
-function agregarSistema(msg){
-
-    agregarChat(
-        "<strong>Sistema:</strong> "
-        + msg
-    );
+function agregarSistema(msg) {
+    agregarChat('<strong>Sistema:</strong> ' + msg, 'system');
 }
 
-function agregarEmergencia(msg){
+function showTutorStatus(text) {
+    var status = document.getElementById('statusText');
+    status.textContent = text;
+}
 
-    let chat =
-    document.getElementById("chat");
-
-    let div =
-    document.createElement("div");
-
-    div.className=
-    "mensaje emergencia";
-
-    div.innerHTML=
-    "🚨 " + msg;
-
-    chat.appendChild(div);
-
-    chat.scrollTop =
-    chat.scrollHeight;
+function hideTutorStatus() {
+    showTutorStatus('El tutor está listo para tu próxima consulta.');
 }
 
 </script>
@@ -355,9 +444,6 @@ function agregarEmergencia(msg){
 </html>
 """
 
-
-
-# WEB CHAT
 
 
 @socket.on("message")
@@ -371,6 +457,27 @@ def recibirMensaje(mensaje):
         broadcast=True
     )
     comandosDeteccion(mensaje)
+
+
+@socket.on('tutor_query')
+def recibirTutorQuery(texto):
+
+    print('TUTOR QUERY:', texto)
+    pregunta = texto[len('/tutor'):].strip()
+
+    if not pregunta:
+        socket.emit('tutor_status', 'Escribe /tutor seguido de tu consulta.')
+        return
+
+    socket.emit('tutor_status', 'El tutor de IA está procesando tu consulta...')
+    respuesta = consultar_tutor_ia(pregunta)
+    socket.emit('tutor_response', respuesta)
+    socket.emit('tutor_status', 'El tutor está listo para tu próxima consulta.')
+
+    enviarTelegram(
+        f"📘 Tutor IA\nPregunta: {pregunta}\nRespuesta: {respuesta}"
+    )
+
 
 #Paso Extra. COnectar los comandos de activacion
 def comandosDeteccion(mensaje):
@@ -416,26 +523,77 @@ def enviarTelegram(texto):
     )
 
     data = {
-
         "chat_id": chatID,
         "text": texto
     }
 
     try:
-
         requests.post(
             url,
             data=data,
             timeout=10
         )
-
     except Exception as e:
-
         print(
             "Telegram error:",
             e
         )
 
+
+def consultar_tutor_ia(pregunta):
+    if not gemini_api_key:
+        return "El tutor de IA no está disponible. Falta la variable GEMINI_API_KEY."
+
+    prompt = (
+        "Eres un Tutor Académico Formal y Profesional. "
+        "Responde en español con claridad, precisión y un tono ejecutivo. "
+        "Explica conceptos de manera estructurada, usa ejemplos cuando sean útiles y mantén la respuesta breve pero completa. "
+        "Si la consulta es técnica, proporciona una explicación clara y ordenada. "
+        f"Consulta: {pregunta}"
+    )
+
+    endpoint = (
+        f"https://gemini.googleapis.com/v1/models/{gemini_model}:generateText"
+        f"?key={gemini_api_key}"
+    )
+
+    payload = {
+        "prompt": {
+            "text": prompt
+        },
+        "temperature": 0.2,
+        "maxOutputTokens": 420
+    }
+
+    try:
+        response = requests.post(
+            endpoint,
+            json=payload,
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            return f"Error del tutor IA: {response.status_code} - {response.text}"
+
+        data = response.json()
+        if isinstance(data, dict):
+            if 'candidates' in data and data['candidates']:
+                candidate = data['candidates'][0]
+                if isinstance(candidate, dict):
+                    return candidate.get('output') or candidate.get('content', '') or str(candidate)
+            if 'output' in data:
+                output = data['output']
+                if isinstance(output, dict):
+                    content = output.get('content')
+                    if isinstance(content, list):
+                        return ''.join(item.get('text', '') for item in content if isinstance(item, dict))
+                    return str(content)
+                return str(output)
+
+        return "El tutor de IA no pudo generar una respuesta en este momento."
+    except Exception as e:
+        print("IA error:", e)
+        return "El tutor de IA no está disponible en este momento. Intenta de nuevo más tarde."
 
 
 # TELEGRAM → WEB
@@ -469,6 +627,33 @@ async def recibirTelegram(
     )
 
 
+async def tutorTelegram(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    pregunta = ' '.join(context.args).strip()
+    if not pregunta:
+        await update.message.reply_text(
+            "Usa /tutor seguido de tu consulta, por ejemplo: /tutor explica la fotosíntesis"
+        )
+        return
+
+    await update.message.reply_text(
+        "El tutor de IA está analizando tu consulta..."
+    )
+
+    respuesta = consultar_tutor_ia(pregunta)
+
+    await update.message.reply_text(respuesta)
+    socket.emit(
+        "tutor_response",
+        respuesta
+    )
+    enviarTelegram(
+        f"📘 Tutor IA\nPregunta: {pregunta}\nRespuesta: {respuesta}"
+    )
+
 
 # BOT
 
@@ -480,13 +665,17 @@ def iniciarBot():
     )
 
     botTelegram.add_handler(
+        CommandHandler(
+            'tutor',
+            tutorTelegram
+        )
+    )
 
+    botTelegram.add_handler(
         MessageHandler(
-
             filters.TEXT
             &
             ~filters.COMMAND,
-
             recibirTelegram
         )
     )
