@@ -34,7 +34,8 @@ def normalizar_modelo_huggingface(valor):
 tokenTelegram = os.getenv('TOKEN_TELEGRAM')
 chatID = os.getenv('CHAT_ID')
 huggingface_api_token = os.getenv('HUGGINGFACE_API_TOKEN')
-huggingface_model = normalizar_modelo_huggingface(os.getenv('HUGGINGFACE_MODEL')) or 'Qwen/Qwen2.5-7B-Instruct-1M'
+huggingface_model_configurado = normalizar_modelo_huggingface(os.getenv('HUGGINGFACE_MODEL'))
+huggingface_model = huggingface_model_configurado or 'Qwen/Qwen2.5-7B-Instruct-1M'
 huggingface_fallback_models = []
 for raw_model in os.getenv('HUGGINGFACE_FALLBACK_MODELS', '').split(','):
     model = normalizar_modelo_huggingface(raw_model)
@@ -339,6 +340,8 @@ def enviarTelegram(texto):
         print("Telegram error:", e)
 
 def obtener_modelos_compatibles_huggingface():
+    if huggingface_model_configurado or huggingface_fallback_models:
+        return []
     return ['HuggingFaceBio/Carbon-3B']
 
 def obtener_modelos_huggingface():
@@ -490,13 +493,19 @@ def consultar_tutor_ia(pregunta):
                 messages=mensajes,
                 max_tokens=400,
                 temperature=0.3,
-                reasoning_effort='none',
             )
             return extraer_texto_chat_completion(respuesta)
 
         except InferenceTimeoutError as e:
             print(f"[DEBUG] HF timeout con {describir_modelo_huggingface(modelo)}: {e}")
             return 'El tutor de IA se está iniciando en Hugging Face. Repite la consulta en 15 segundos.'
+
+        except TypeError as e:
+            print(f"[DEBUG] HF TypeError con {describir_modelo_huggingface(modelo)}: {e}")
+            return (
+                'La versión de huggingface_hub instalada en Render no soporta uno de los parámetros enviados por el tutor. '
+                f'Detalle: {str(e)[:180]}'
+            )
 
         except HfHubHTTPError as e:
             status_code = obtener_status_code_hf(e)
