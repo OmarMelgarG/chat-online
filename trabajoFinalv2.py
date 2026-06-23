@@ -11,14 +11,15 @@ from telegram.ext import (
 import threading
 import requests
 import asyncio
+import os
 
 
 
 # TELEGRAM
 
 
-tokenTelegram = os.getenv.TOKEN_TELEGRAM
-chatID = os.getenv.CHAT_ID
+tokenTelegram = os.getenv('TOKEN_TELEGRAM')
+chatID = os.getenv('CHAT_ID')
 
 #PALABRAS CLAVE DE ACTIVACION
 palabrasClave={
@@ -513,10 +514,11 @@ if __name__ == "__main__":
         "Servidor iniciado"
     )
 
+    puerto = int(os.getenv('PORT', 5000))
     socket.run(
         app,
         host="0.0.0.0",
-        port=5000,
-        debug=True,
+        port=puerto,
+        debug=False,
         allow_unsafe_werkzeug=True
     )
