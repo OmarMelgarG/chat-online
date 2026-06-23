@@ -744,7 +744,8 @@ def iniciarBot():
         "BOT TELEGRAM ACTIVO"
     )
 
-    botTelegram.run_polling()
+    # CORRECCIÓN AQUÍ: Evitamos que intente capturar señales del sistema operativo en el hilo secundario
+    botTelegram.run_polling(stop_signals=None)
 
 
 
@@ -764,11 +765,12 @@ if __name__ == "__main__":
     )
 
     puerto = int(os.getenv('PORT', 5000))
+    
+    # CORRECCIÓN AQUÍ: Quitamos 'allow_unsafe_webkit' que provocaba el TypeError
     socket.run(
         app,
         host="0.0.0.0",
         port=puerto,
         debug=False,
-        allow_unsafe_webkit=True,
         allow_unsafe_werkzeug=True
     )
