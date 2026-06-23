@@ -13,18 +13,24 @@ import threading
 import requests
 import asyncio
 import os
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # CONFIGURACIÓN DE VARIABLES DE ENTORNO
 tokenTelegram = os.getenv('TOKEN_TELEGRAM')
 chatID = os.getenv('CHAT_ID')
 huggingface_api_token = os.getenv('HUGGINGFACE_API_TOKEN')
 huggingface_model = os.getenv('HUGGINGFACE_MODEL', 'google/flan-t5-small')
+huggingface_api_base_url = os.getenv('HUGGINGFACE_API_BASE_URL', 'https://api-inference.huggingface.co')
+huggingface_router_base_url = os.getenv('HUGGINGFACE_ROUTER_BASE_URL', 'https://router.huggingface.co/hf-inference')
 
 # DEBUG: Verificación de variables en el arranque
 print(f"[STARTUP DEBUG] TOKEN_TELEGRAM: {'✓' if tokenTelegram else 'MISSING'}")
 print(f"[STARTUP DEBUG] CHAT_ID: {'✓' if chatID else 'MISSING'}")
 print(f"[STARTUP DEBUG] HUGGINGFACE_API_TOKEN: {'✓' if huggingface_api_token else 'MISSING'}")
 print(f"[STARTUP DEBUG] HUGGINGFACE_MODEL: {huggingface_model if huggingface_model else 'MISSING'}")
+print(f"[STARTUP DEBUG] HUGGINGFACE_API_BASE_URL: {huggingface_api_base_url}")
+print(f"[STARTUP DEBUG] HUGGINGFACE_ROUTER_BASE_URL: {huggingface_router_base_url}")
 
 # PALABRAS CLAVE DE ACTIVACIÓN
 palabrasClave = {
@@ -311,6 +317,29 @@ def enviarTelegram(texto):
     except Exception as e:
         print("Telegram error:", e)
 
+def crear_sesion_http_con_reintentos():
+    retry = Retry(
+        total=2,
+        connect=2,
+        read=2,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=frozenset(["POST"]),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session = requests.Session()
+    session.mount('https://', adapter)
+    session.mount('http://', adapter)
+    return session
+
+def obtener_endpoints_huggingface():
+    endpoints = []
+    for base_url in (huggingface_api_base_url, huggingface_router_base_url):
+        if base_url:
+            endpoints.append(f"{base_url.rstrip('/')}/models/{huggingface_model}")
+    return endpoints
+
 # CONSULTA EXCLUSIVA A HUGGING FACE
 def consultar_tutor_ia(pregunta):
     print(f"[DEBUG] consultar_tutor_ia llamado con: {pregunta[:50]}...")
@@ -327,7 +356,6 @@ def consultar_tutor_ia(pregunta):
     if not huggingface_api_token:
         return "El tutor de IA no está disponible. Falta configurar la variable HUGGINGFACE_API_TOKEN en Render."
 
-    url = f"https://api-inference.huggingface.co/models/{huggingface_model}"
     headers = {
         "Authorization": f"Bearer {huggingface_api_token}",
         "Content-Type": "application/json"
@@ -336,37 +364,58 @@ def consultar_tutor_ia(pregunta):
         "inputs": prompt,
         "parameters": {"max_new_tokens": 250, "temperature": 0.3}
     }
+    session = crear_sesion_http_con_reintentos()
+    errores_red = []
     
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=20)
-        print(f"[DEBUG] HF Respuesta status: {resp.status_code}")
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            if isinstance(data, list) and data:
-                first = data[0]
-                if isinstance(first, dict):
-                    return first.get('generated_text') or first.get('text') or str(first)
-                return str(first)
-            if isinstance(data, dict):
-                for key in ('generated_text', 'text', 'output'):
-                    if key in data and isinstance(data[key], str):
-                        return data[key]
-                return str(data)
-            return str(data)
-        
-        elif resp.status_code == 503:
-            return "El tutor de IA se está iniciando en el servidor gratuito de Hugging Face. Por favor, repite la pregunta en 15 segundos."
-        
-        elif resp.status_code == 401:
-            return "Error de autorización (401) en Hugging Face. Revisa tu HUGGINGFACE_API_TOKEN."
-            
-        else:
-            return f"Hugging Face respondió con error {resp.status_code}: {resp.text[:100]}"
-            
-    except Exception as e:
-        print(f"[DEBUG] HF error: {e}")
-        return f"Error de conexión con Hugging Face: {str(e)}"
+        for url in obtener_endpoints_huggingface():
+            try:
+                print(f"[DEBUG] Probando endpoint HF: {url}")
+                resp = session.post(url, headers=headers, json=payload, timeout=20)
+                print(f"[DEBUG] HF Respuesta status: {resp.status_code}")
+
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if isinstance(data, list) and data:
+                        first = data[0]
+                        if isinstance(first, dict):
+                            return first.get('generated_text') or first.get('text') or str(first)
+                        return str(first)
+                    if isinstance(data, dict):
+                        for key in ('generated_text', 'text', 'output'):
+                            if key in data and isinstance(data[key], str):
+                                return data[key]
+                        return str(data)
+                    return str(data)
+
+                if resp.status_code == 503:
+                    return "El tutor de IA se está iniciando en el servidor gratuito de Hugging Face. Por favor, repite la pregunta en 15 segundos."
+
+                if resp.status_code == 401:
+                    return "Error de autorización (401) en Hugging Face. Revisa tu HUGGINGFACE_API_TOKEN."
+
+                if resp.status_code in (404, 410):
+                    errores_red.append(f"{url} devolvió {resp.status_code}")
+                    continue
+
+                return f"Hugging Face respondió con error {resp.status_code}: {resp.text[:100]}"
+
+            except requests.exceptions.RequestException as e:
+                print(f"[DEBUG] HF error en {url}: {e}")
+                errores_red.append(f"{url}: {e}")
+                continue
+
+        if errores_red:
+            detalles = " | ".join(errores_red[:2])
+            return (
+                "Error de conexión con Hugging Face. "
+                "El servicio no respondió desde los endpoints configurados. "
+                f"Detalle: {detalles}"
+            )
+
+        return "No se encontró un endpoint válido de Hugging Face para el tutor IA."
+    finally:
+        session.close()
 
 # RECEPCIÓN DESDE TELEGRAM → WEB
 async def recibirTelegram(update: Update, context: ContextTypes.DEFAULT_TYPE):
