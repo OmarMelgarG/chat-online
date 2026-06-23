@@ -552,43 +552,60 @@ def consultar_tutor_ia(pregunta):
         f"Consulta: {pregunta}"
     )
 
+    # Use the Generative Language API host (generativelanguage.googleapis.com)
     endpoint = (
-        f"https://gemini.googleapis.com/v1/models/{gemini_model}:generateText"
+        f"https://generativelanguage.googleapis.com/v1beta2/models/{gemini_model}:generateText"
         f"?key={gemini_api_key}"
     )
 
     payload = {
-        "prompt": {
-            "text": prompt
-        },
+        "prompt": {"text": prompt},
         "temperature": 0.2,
         "maxOutputTokens": 420
     }
 
     try:
-        response = requests.post(
-            endpoint,
-            json=payload,
-            timeout=15
-        )
+        response = requests.post(endpoint, json=payload, timeout=20)
 
         if response.status_code != 200:
+            # Log response for debugging
+            print(f"IA request failed: {response.status_code} {response.text}")
             return f"Error del tutor IA: {response.status_code} - {response.text}"
 
         data = response.json()
+
+        # Handle multiple possible response shapes
+        # 1) {"candidates": [{"output": "..."}, ...]}
         if isinstance(data, dict):
-            if 'candidates' in data and data['candidates']:
-                candidate = data['candidates'][0]
-                if isinstance(candidate, dict):
-                    return candidate.get('output') or candidate.get('content', '') or str(candidate)
+            if 'candidates' in data and isinstance(data['candidates'], list) and data['candidates']:
+                first = data['candidates'][0]
+                if isinstance(first, dict):
+                    # Newer APIs may use 'output' or 'content'
+                    out = first.get('output') or first.get('content') or first.get('text')
+                    if isinstance(out, str):
+                        return out
+                    if isinstance(out, dict):
+                        # try to extract nested text
+                        return out.get('text', str(out))
+
+            # 2) {"output": {"content": [{"text":"..."}, ...]}}
             if 'output' in data:
                 output = data['output']
                 if isinstance(output, dict):
                     content = output.get('content')
                     if isinstance(content, list):
-                        return ''.join(item.get('text', '') for item in content if isinstance(item, dict))
-                    return str(content)
-                return str(output)
+                        texts = []
+                        for item in content:
+                            if isinstance(item, dict):
+                                texts.append(item.get('text', ''))
+                        if texts:
+                            return ''.join(texts)
+                    # fallback to string
+                    return str(output)
+
+            # 3) older simple shape: {"candidates": ["..."]}
+            if 'candidates' in data and isinstance(data['candidates'][0], str):
+                return data['candidates'][0]
 
         return "El tutor de IA no pudo generar una respuesta en este momento."
     except Exception as e:
