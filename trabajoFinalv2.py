@@ -559,14 +559,14 @@ def consultar_tutor_ia(pregunta):
     prompt = (
         "Eres un Tutor Académico Formal y Profesional. "
         "Responde en español con claridad, precisión y un tono ejecutivo. "
-        "Explica conceptos de manera estructurada, usa ejemplos cuando sean útiles y mantén la respuesta breve pero completa. "
-        "Si la consulta es técnica, proporciona una explicación clara y ordenada. "
+        "Explica conceptos de manera estructurada y mantén la respuesta breve. "
         f"Consulta: {pregunta}"
     )
 
-    # First try Hugging Face Inference (preferred if token provided)
     hf_token = huggingface_api_token
     hf_model = huggingface_model
+    
+    # Intenta primero con Hugging Face si la variable existe
     if hf_token:
         print(f"[DEBUG] Attempting HF Inference with model: {hf_model}")
         url = f"https://api-inference.huggingface.co/models/{hf_model}"
@@ -576,42 +576,45 @@ def consultar_tutor_ia(pregunta):
         }
         payload = {
             "inputs": prompt,
-            "parameters": {"max_new_tokens": 250, "temperature": 0.2}
+            "parameters": {"max_new_tokens": 250, "temperature": 0.3}
         }
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=20)
             print(f"[DEBUG] HF Response status: {resp.status_code}")
+            
             if resp.status_code == 200:
-                try:
-                    data = resp.json()
-                except Exception:
-                    return resp.text
-
-                # Possible response formats: list[dict]{generated_text}, dict{generated_text}, or plain string
+                data = resp.json()
                 if isinstance(data, list) and data:
                     first = data[0]
                     if isinstance(first, dict):
                         return first.get('generated_text') or first.get('text') or str(first)
                     return str(first)
-
                 if isinstance(data, dict):
                     for key in ('generated_text', 'text', 'output'):
                         if key in data and isinstance(data[key], str):
                             return data[key]
-                    # fallback
                     return str(data)
-
-                if isinstance(data, str):
-                    return data
+                return str(data)
+            
+            # Si el modelo se está cargando (Error clásico 503 en HF Gratis)
+            elif resp.status_code == 503:
+                return "El tutor de IA (Hugging Face) se está iniciando en el servidor gratuito. Por favor, repite la pregunta en 15 segundos."
+            
+            # Si las credenciales fallan
+            elif resp.status_code == 401:
+                return "Error de autorización (401) en Hugging Face. Revisa que tu HUGGINGFACE_API_TOKEN en Render sea correcto."
+                
             else:
-                print(f"[DEBUG] HF request failed: {resp.status_code} {resp.text[:200]}")
+                return f"Hugging Face respondió con el error {resp.status_code}: {resp.text[:100]}"
+                
         except Exception as e:
             print(f"[DEBUG] HF error: {e}")
+            return f"Error de conexión con Hugging Face: {str(e)}"
 
-    # Fallback to Gemini if HF not available or failed
+    # Si NO hay token de Hugging Face, se evalúa Gemini de respaldo
     print(f"[DEBUG] Falling back to Gemini. Gemini key available: {bool(gemini_api_key)}")
     if not gemini_api_key:
-        return "El tutor de IA no está disponible. Falta la variable de API (HUGGINGFACE_API_TOKEN o GEMINI_API_KEY)."
+        return "El tutor de IA no está disponible. Falta configurar la variable HUGGINGFACE_API_TOKEN en Render."
 
     endpoint = (
         f"https://gemini.googleapis.com/v1/models/{gemini_model}:generateText"
@@ -630,7 +633,7 @@ def consultar_tutor_ia(pregunta):
         response = requests.post(endpoint, json=payload, timeout=15)
 
         if response.status_code != 200:
-            return f"Error del tutor IA: {response.status_code} - {response.text}"
+            return f"Error del tutor IA (Gemini): {response.status_code} - {response.text[:100]}"
 
         data = response.json()
         if isinstance(data, dict):
@@ -766,5 +769,6 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=puerto,
         debug=False,
+        allow_unsafe_webkit=True,
         allow_unsafe_werkzeug=True
     )
