@@ -30,7 +30,14 @@ huggingface_fallback_models = [
 ]
 huggingface_api_base_url = os.getenv('HUGGINGFACE_API_BASE_URL', 'https://api-inference.huggingface.co')
 huggingface_router_base_url = os.getenv('HUGGINGFACE_ROUTER_BASE_URL', 'https://router.huggingface.co/hf-inference')
-huggingface_enable_router_fallback = os.getenv('HUGGINGFACE_ENABLE_ROUTER_FALLBACK', 'false').lower() == 'true'
+huggingface_router_mode = os.getenv('HUGGINGFACE_ROUTER_MODE')
+if not huggingface_router_mode:
+    legacy_router_flag = os.getenv('HUGGINGFACE_ENABLE_ROUTER_FALLBACK')
+    if legacy_router_flag is None:
+        huggingface_router_mode = 'auto'
+    else:
+        huggingface_router_mode = 'always' if legacy_router_flag.lower() == 'true' else 'never'
+huggingface_router_mode = huggingface_router_mode.lower()
 
 # DEBUG: Verificación de variables en el arranque
 print(f"[STARTUP DEBUG] TOKEN_TELEGRAM: {'✓' if tokenTelegram else 'MISSING'}")
@@ -40,7 +47,7 @@ print(f"[STARTUP DEBUG] HUGGINGFACE_MODEL: {huggingface_model if huggingface_mod
 print(f"[STARTUP DEBUG] HUGGINGFACE_FALLBACK_MODELS: {huggingface_fallback_models}")
 print(f"[STARTUP DEBUG] HUGGINGFACE_API_BASE_URL: {huggingface_api_base_url}")
 print(f"[STARTUP DEBUG] HUGGINGFACE_ROUTER_BASE_URL: {huggingface_router_base_url}")
-print(f"[STARTUP DEBUG] HUGGINGFACE_ENABLE_ROUTER_FALLBACK: {huggingface_enable_router_fallback}")
+print(f"[STARTUP DEBUG] HUGGINGFACE_ROUTER_MODE: {huggingface_router_mode}")
 
 # PALABRAS CLAVE DE ACTIVACIÓN
 palabrasClave = {
@@ -353,13 +360,24 @@ def obtener_modelos_huggingface():
             modelos.append(model)
     return modelos
 
+def usar_router_huggingface(modelo):
+    modelos_no_compatibles_router = {'google/flan-t5-small', 'google/flan-t5-base'}
+
+    if huggingface_router_mode == 'never':
+        return False
+    if huggingface_router_mode == 'always':
+        return True
+    return modelo not in modelos_no_compatibles_router
+
 def obtener_endpoints_huggingface(modelo):
     endpoints = []
+
+    if usar_router_huggingface(modelo) and huggingface_router_base_url:
+        endpoints.append(f"{huggingface_router_base_url.rstrip('/')}/models/{modelo}")
+
     if huggingface_api_base_url:
         endpoints.append(f"{huggingface_api_base_url.rstrip('/')}/models/{modelo}")
-    if huggingface_enable_router_fallback and huggingface_router_base_url:
-        if modelo not in {'google/flan-t5-small', 'google/flan-t5-base'}:
-            endpoints.append(f"{huggingface_router_base_url.rstrip('/')}/models/{modelo}")
+
     return endpoints
 
 def interpretar_respuesta_hf(data):
@@ -445,9 +463,9 @@ def consultar_tutor_ia(pregunta):
                         return "Error de autorización (401) en Hugging Face. Revisa tu HUGGINGFACE_API_TOKEN."
 
                     if es_modelo_no_soportado(resp):
-                        modelo_no_soportado.append(modelo)
-                        print(f"[DEBUG] Modelo no soportado por el proveedor actual: {modelo}")
-                        break
+                        modelo_no_soportado.append(f"{modelo} en {url}")
+                        print(f"[DEBUG] Modelo no soportado por el proveedor actual: {modelo} en {url}")
+                        continue
 
                     if resp.status_code in (404, 410):
                         errores_red.append(f"{url} devolvió {resp.status_code}")
