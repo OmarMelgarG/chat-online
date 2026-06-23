@@ -1,6 +1,7 @@
 from flask import Flask
 from flask_socketio import SocketIO, send
 from telegram import Update
+from telegram.error import Conflict
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -13,6 +14,7 @@ import threading
 import requests
 import asyncio
 import os
+import time
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -21,16 +23,24 @@ tokenTelegram = os.getenv('TOKEN_TELEGRAM')
 chatID = os.getenv('CHAT_ID')
 huggingface_api_token = os.getenv('HUGGINGFACE_API_TOKEN')
 huggingface_model = os.getenv('HUGGINGFACE_MODEL', 'google/flan-t5-small')
+huggingface_fallback_models = [
+    model.strip()
+    for model in os.getenv('HUGGINGFACE_FALLBACK_MODELS', 'bigscience/bloomz-560m').split(',')
+    if model.strip()
+]
 huggingface_api_base_url = os.getenv('HUGGINGFACE_API_BASE_URL', 'https://api-inference.huggingface.co')
 huggingface_router_base_url = os.getenv('HUGGINGFACE_ROUTER_BASE_URL', 'https://router.huggingface.co/hf-inference')
+huggingface_enable_router_fallback = os.getenv('HUGGINGFACE_ENABLE_ROUTER_FALLBACK', 'false').lower() == 'true'
 
 # DEBUG: Verificación de variables en el arranque
 print(f"[STARTUP DEBUG] TOKEN_TELEGRAM: {'✓' if tokenTelegram else 'MISSING'}")
 print(f"[STARTUP DEBUG] CHAT_ID: {'✓' if chatID else 'MISSING'}")
 print(f"[STARTUP DEBUG] HUGGINGFACE_API_TOKEN: {'✓' if huggingface_api_token else 'MISSING'}")
 print(f"[STARTUP DEBUG] HUGGINGFACE_MODEL: {huggingface_model if huggingface_model else 'MISSING'}")
+print(f"[STARTUP DEBUG] HUGGINGFACE_FALLBACK_MODELS: {huggingface_fallback_models}")
 print(f"[STARTUP DEBUG] HUGGINGFACE_API_BASE_URL: {huggingface_api_base_url}")
 print(f"[STARTUP DEBUG] HUGGINGFACE_ROUTER_BASE_URL: {huggingface_router_base_url}")
+print(f"[STARTUP DEBUG] HUGGINGFACE_ENABLE_ROUTER_FALLBACK: {huggingface_enable_router_fallback}")
 
 # PALABRAS CLAVE DE ACTIVACIÓN
 palabrasClave = {
@@ -50,8 +60,11 @@ socket = SocketIO(
     async_mode="threading"
 )
 
-# INICIALIZACIÓN DEL BOT DE TELEGRAM
-botTelegram = ApplicationBuilder().token(tokenTelegram).build()
+def crear_bot_telegram():
+    bot = ApplicationBuilder().token(tokenTelegram).build()
+    bot.add_handler(CommandHandler('tutor', tutorTelegram))
+    bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, recibirTelegram))
+    return bot
 
 # INTERFAZ HTML
 @app.route("/")
@@ -333,12 +346,57 @@ def crear_sesion_http_con_reintentos():
     session.mount('http://', adapter)
     return session
 
-def obtener_endpoints_huggingface():
+def obtener_modelos_huggingface():
+    modelos = [huggingface_model]
+    for model in huggingface_fallback_models:
+        if model not in modelos:
+            modelos.append(model)
+    return modelos
+
+def obtener_endpoints_huggingface(modelo):
     endpoints = []
-    for base_url in (huggingface_api_base_url, huggingface_router_base_url):
-        if base_url:
-            endpoints.append(f"{base_url.rstrip('/')}/models/{huggingface_model}")
+    if huggingface_api_base_url:
+        endpoints.append(f"{huggingface_api_base_url.rstrip('/')}/models/{modelo}")
+    if huggingface_enable_router_fallback and huggingface_router_base_url:
+        if modelo not in {'google/flan-t5-small', 'google/flan-t5-base'}:
+            endpoints.append(f"{huggingface_router_base_url.rstrip('/')}/models/{modelo}")
     return endpoints
+
+def interpretar_respuesta_hf(data):
+    if isinstance(data, list) and data:
+        first = data[0]
+        if isinstance(first, dict):
+            return first.get('generated_text') or first.get('text') or str(first)
+        return str(first)
+    if isinstance(data, dict):
+        for key in ('generated_text', 'text', 'output'):
+            if key in data and isinstance(data[key], str):
+                return data[key]
+        return str(data)
+    return str(data)
+
+def es_modelo_no_soportado(resp):
+    try:
+        body = resp.json()
+    except ValueError:
+        body = resp.text
+    detalle = str(body)
+    return resp.status_code == 400 and 'Model not supported by provider hf-inference' in detalle
+
+def construir_mensaje_error_red(errores_red):
+    detalles = ' | '.join(errores_red[:2])
+    return (
+        'Error de conexión con Hugging Face. '
+        'El servicio no respondió desde los endpoints configurados. '
+        f'Detalle: {detalles}'
+    )
+
+def construir_mensaje_modelo_no_soportado(modelo):
+    return (
+        'El modelo configurado en Hugging Face no está soportado por el proveedor disponible. '
+        f'Modelo actual: {modelo}. '
+        'Configura HUGGINGFACE_MODEL con un modelo compatible o usa HUGGINGFACE_FALLBACK_MODELS.'
+    )
 
 # CONSULTA EXCLUSIVA A HUGGING FACE
 def consultar_tutor_ia(pregunta):
@@ -366,52 +424,47 @@ def consultar_tutor_ia(pregunta):
     }
     session = crear_sesion_http_con_reintentos()
     errores_red = []
+    modelo_no_soportado = []
     
     try:
-        for url in obtener_endpoints_huggingface():
-            try:
-                print(f"[DEBUG] Probando endpoint HF: {url}")
-                resp = session.post(url, headers=headers, json=payload, timeout=20)
-                print(f"[DEBUG] HF Respuesta status: {resp.status_code}")
+        for modelo in obtener_modelos_huggingface():
+            print(f"[DEBUG] Probando modelo HF: {modelo}")
+            for url in obtener_endpoints_huggingface(modelo):
+                try:
+                    print(f"[DEBUG] Probando endpoint HF: {url}")
+                    resp = session.post(url, headers=headers, json=payload, timeout=20)
+                    print(f"[DEBUG] HF Respuesta status: {resp.status_code}")
 
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if isinstance(data, list) and data:
-                        first = data[0]
-                        if isinstance(first, dict):
-                            return first.get('generated_text') or first.get('text') or str(first)
-                        return str(first)
-                    if isinstance(data, dict):
-                        for key in ('generated_text', 'text', 'output'):
-                            if key in data and isinstance(data[key], str):
-                                return data[key]
-                        return str(data)
-                    return str(data)
+                    if resp.status_code == 200:
+                        return interpretar_respuesta_hf(resp.json())
 
-                if resp.status_code == 503:
-                    return "El tutor de IA se está iniciando en el servidor gratuito de Hugging Face. Por favor, repite la pregunta en 15 segundos."
+                    if resp.status_code == 503:
+                        return "El tutor de IA se está iniciando en el servidor gratuito de Hugging Face. Por favor, repite la pregunta en 15 segundos."
 
-                if resp.status_code == 401:
-                    return "Error de autorización (401) en Hugging Face. Revisa tu HUGGINGFACE_API_TOKEN."
+                    if resp.status_code == 401:
+                        return "Error de autorización (401) en Hugging Face. Revisa tu HUGGINGFACE_API_TOKEN."
 
-                if resp.status_code in (404, 410):
-                    errores_red.append(f"{url} devolvió {resp.status_code}")
+                    if es_modelo_no_soportado(resp):
+                        modelo_no_soportado.append(modelo)
+                        print(f"[DEBUG] Modelo no soportado por el proveedor actual: {modelo}")
+                        break
+
+                    if resp.status_code in (404, 410):
+                        errores_red.append(f"{url} devolvió {resp.status_code}")
+                        continue
+
+                    return f"Hugging Face respondió con error {resp.status_code}: {resp.text[:100]}"
+
+                except requests.exceptions.RequestException as e:
+                    print(f"[DEBUG] HF error en {url}: {e}")
+                    errores_red.append(f"{url}: {e}")
                     continue
 
-                return f"Hugging Face respondió con error {resp.status_code}: {resp.text[:100]}"
-
-            except requests.exceptions.RequestException as e:
-                print(f"[DEBUG] HF error en {url}: {e}")
-                errores_red.append(f"{url}: {e}")
-                continue
+        if modelo_no_soportado:
+            return construir_mensaje_modelo_no_soportado(modelo_no_soportado[0])
 
         if errores_red:
-            detalles = " | ".join(errores_red[:2])
-            return (
-                "Error de conexión con Hugging Face. "
-                "El servicio no respondió desde los endpoints configurados. "
-                f"Detalle: {detalles}"
-            )
+            return construir_mensaje_error_red(errores_red)
 
         return "No se encontró un endpoint válido de Hugging Face para el tutor IA."
     finally:
@@ -440,10 +493,22 @@ async def tutorTelegram(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # FUNCIÓN DEL HILO DEL BOT
 def iniciarBot():
     asyncio.set_event_loop(asyncio.new_event_loop())
-    botTelegram.add_handler(CommandHandler('tutor', tutorTelegram))
-    botTelegram.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, recibirTelegram))
-    print("BOT TELEGRAM ACTIVO")
-    botTelegram.run_polling(stop_signals=None)
+    if not tokenTelegram:
+        print("BOT TELEGRAM INACTIVO: falta TOKEN_TELEGRAM")
+        return
+
+    while True:
+        botTelegram = crear_bot_telegram()
+        try:
+            print("BOT TELEGRAM ACTIVO")
+            botTelegram.run_polling(stop_signals=None, drop_pending_updates=True)
+            return
+        except Conflict as e:
+            print(f"BOT TELEGRAM EN CONFLICTO: {e}. Reintentando en 10 segundos...")
+            time.sleep(10)
+        except Exception as e:
+            print(f"BOT TELEGRAM ERROR: {e}. Reintentando en 15 segundos...")
+            time.sleep(15)
 
 # EJECUCIÓN PRINCIPAL
 if __name__ == "__main__":
