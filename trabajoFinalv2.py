@@ -22,7 +22,7 @@ import os
 tokenTelegram = os.getenv('TOKEN_TELEGRAM')
 chatID = os.getenv('CHAT_ID')
 gemini_api_key = os.getenv('GEMINI_API_KEY')
-gemini_model = os.getenv('GEMINI_MODEL', 'gemini-1.5-lite')
+gemini_model = os.getenv('GEMINI_MODEL', 'text-bison-001')
 
 #PALABRAS CLAVE DE ACTIVACION
 palabrasClave={
