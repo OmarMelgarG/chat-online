@@ -22,7 +22,10 @@ import os
 tokenTelegram = os.getenv('TOKEN_TELEGRAM')
 chatID = os.getenv('CHAT_ID')
 gemini_api_key = os.getenv('GEMINI_API_KEY')
-gemini_model = os.getenv('GEMINI_MODEL', 'text-bison-001')
+gemini_model = os.getenv('GEMINI_MODEL', 'gemini-1.5-lite')
+# Hugging Face
+huggingface_api_token = os.getenv('HUGGINGFACE_API_TOKEN')
+huggingface_model = os.getenv('HUGGINGFACE_MODEL', 'google/flan-t5-small')
 
 #PALABRAS CLAVE DE ACTIVACION
 palabrasClave={
@@ -540,32 +543,7 @@ def enviarTelegram(texto):
         )
 
 
-def _consultar_modelo_gemini(modelo, payload):
-    versiones = ['v1beta2', 'v1']
-    for version in versiones:
-        endpoint = (
-            f"https://generativelanguage.googleapis.com/{version}/models/{modelo}:generateText"
-            f"?key={gemini_api_key}"
-        )
-        try:
-            response = requests.post(endpoint, json=payload, timeout=20)
-        except Exception as e:
-            print(f"IA request exception for model {modelo} at {version}:", e)
-            continue
-
-        if response.status_code == 404:
-            print(f"Modelo no encontrado en {version}: {modelo}")
-            continue
-
-        return response
-
-    return None
-
-
 def consultar_tutor_ia(pregunta):
-    if not gemini_api_key:
-        return "El tutor de IA no está disponible. Falta la variable GEMINI_API_KEY."
-
     prompt = (
         "Eres un Tutor Académico Formal y Profesional. "
         "Responde en español con claridad, precisión y un tono ejecutivo. "
@@ -574,57 +552,90 @@ def consultar_tutor_ia(pregunta):
         f"Consulta: {pregunta}"
     )
 
+    # First try Hugging Face Inference (preferred if token provided)
+    hf_token = huggingface_api_token
+    hf_model = huggingface_model
+    if hf_token:
+        url = f"https://api-inference.huggingface.co/models/{hf_model}"
+        headers = {
+            "Authorization": f"Bearer {hf_token}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "inputs": prompt,
+            "parameters": {"max_new_tokens": 250, "temperature": 0.2}
+        }
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=20)
+            if resp.status_code == 200:
+                try:
+                    data = resp.json()
+                except Exception:
+                    return resp.text
+
+                # Possible response formats: list[dict]{generated_text}, dict{generated_text}, or plain string
+                if isinstance(data, list) and data:
+                    first = data[0]
+                    if isinstance(first, dict):
+                        return first.get('generated_text') or first.get('text') or str(first)
+                    return str(first)
+
+                if isinstance(data, dict):
+                    for key in ('generated_text', 'text', 'output'):
+                        if key in data and isinstance(data[key], str):
+                            return data[key]
+                    # fallback
+                    return str(data)
+
+                if isinstance(data, str):
+                    return data
+            else:
+                print(f"HF request failed: {resp.status_code} {resp.text}")
+        except Exception as e:
+            print("HF error:", e)
+
+    # Fallback to Gemini if HF not available or failed
+    if not gemini_api_key:
+        return "El tutor de IA no está disponible. Falta la variable de API (HUGGINGFACE_API_TOKEN o GEMINI_API_KEY)."
+
+    endpoint = (
+        f"https://gemini.googleapis.com/v1/models/{gemini_model}:generateText"
+        f"?key={gemini_api_key}"
+    )
+
     payload = {
-        "prompt": {"text": prompt},
+        "prompt": {
+            "text": prompt
+        },
         "temperature": 0.2,
         "maxOutputTokens": 420
     }
 
-    modelos = [gemini_model, 'text-bison-001', 'chat-bison-001']
-    modelo_probado = None
-    response = None
+    try:
+        response = requests.post(endpoint, json=payload, timeout=15)
 
-    for modelo in modelos:
-        response = _consultar_modelo_gemini(modelo, payload)
-        if response is None:
-            continue
+        if response.status_code != 200:
+            return f"Error del tutor IA: {response.status_code} - {response.text}"
 
-        modelo_probado = modelo
-        break
-
-    if response is None:
-        return "El tutor de IA no está disponible en este momento. Intenta de nuevo más tarde."
-
-    if response.status_code != 200:
-        print(f"IA request failed ({modelo_probado}): {response.status_code} {response.text}")
-        return f"Error del tutor IA: {response.status_code} - {response.text}"
-
-    data = response.json()
-
-    if isinstance(data, dict):
-        if 'candidates' in data and isinstance(data['candidates'], list) and data['candidates']:
-            first = data['candidates'][0]
-            if isinstance(first, dict):
-                out = first.get('output') or first.get('content') or first.get('text')
-                if isinstance(out, str):
-                    return out
-                if isinstance(out, dict):
-                    return out.get('text', str(out))
-
-        if 'output' in data:
-            output = data['output']
-            if isinstance(output, dict):
-                content = output.get('content')
-                if isinstance(content, list):
-                    texts = [item.get('text', '') for item in content if isinstance(item, dict)]
-                    if texts:
-                        return ''.join(texts)
+        data = response.json()
+        if isinstance(data, dict):
+            if 'candidates' in data and data['candidates']:
+                candidate = data['candidates'][0]
+                if isinstance(candidate, dict):
+                    return candidate.get('output') or candidate.get('content', '') or str(candidate)
+            if 'output' in data:
+                output = data['output']
+                if isinstance(output, dict):
+                    content = output.get('content')
+                    if isinstance(content, list):
+                        return ''.join(item.get('text', '') for item in content if isinstance(item, dict))
+                    return str(content)
                 return str(output)
 
-        if 'candidates' in data and isinstance(data['candidates'][0], str):
-            return data['candidates'][0]
-
-    return "El tutor de IA no pudo generar una respuesta en este momento."
+        return "El tutor de IA no pudo generar una respuesta en este momento."
+    except Exception as e:
+        print("IA error:", e)
+        return "El tutor de IA no está disponible en este momento. Intenta de nuevo más tarde."
 
 
 # TELEGRAM → WEB
