@@ -540,6 +540,15 @@ def enviarTelegram(texto):
         )
 
 
+def _consultar_modelo_gemini(modelo, payload):
+    endpoint = (
+        f"https://generativelanguage.googleapis.com/v1beta2/models/{modelo}:generateText"
+        f"?key={gemini_api_key}"
+    )
+    response = requests.post(endpoint, json=payload, timeout=20)
+    return response
+
+
 def consultar_tutor_ia(pregunta):
     if not gemini_api_key:
         return "El tutor de IA no está disponible. Falta la variable GEMINI_API_KEY."
@@ -552,65 +561,63 @@ def consultar_tutor_ia(pregunta):
         f"Consulta: {pregunta}"
     )
 
-    # Use the Generative Language API host (generativelanguage.googleapis.com)
-    endpoint = (
-        f"https://generativelanguage.googleapis.com/v1beta2/models/{gemini_model}:generateText"
-        f"?key={gemini_api_key}"
-    )
-
     payload = {
         "prompt": {"text": prompt},
         "temperature": 0.2,
         "maxOutputTokens": 420
     }
 
-    try:
-        response = requests.post(endpoint, json=payload, timeout=20)
+    modelos = [gemini_model, 'text-bison-001', 'chat-bison-001']
+    modelo_probado = None
+    response = None
 
-        if response.status_code != 200:
-            # Log response for debugging
-            print(f"IA request failed: {response.status_code} {response.text}")
-            return f"Error del tutor IA: {response.status_code} - {response.text}"
+    for modelo in modelos:
+        try:
+            response = _consultar_modelo_gemini(modelo, payload)
+        except Exception as e:
+            print(f"IA request exception for model {modelo}:", e)
+            continue
 
-        data = response.json()
+        if response.status_code == 404:
+            print(f"Modelo no encontrado: {modelo}")
+            continue
 
-        # Handle multiple possible response shapes
-        # 1) {"candidates": [{"output": "..."}, ...]}
-        if isinstance(data, dict):
-            if 'candidates' in data and isinstance(data['candidates'], list) and data['candidates']:
-                first = data['candidates'][0]
-                if isinstance(first, dict):
-                    # Newer APIs may use 'output' or 'content'
-                    out = first.get('output') or first.get('content') or first.get('text')
-                    if isinstance(out, str):
-                        return out
-                    if isinstance(out, dict):
-                        # try to extract nested text
-                        return out.get('text', str(out))
+        modelo_probado = modelo
+        break
 
-            # 2) {"output": {"content": [{"text":"..."}, ...]}}
-            if 'output' in data:
-                output = data['output']
-                if isinstance(output, dict):
-                    content = output.get('content')
-                    if isinstance(content, list):
-                        texts = []
-                        for item in content:
-                            if isinstance(item, dict):
-                                texts.append(item.get('text', ''))
-                        if texts:
-                            return ''.join(texts)
-                    # fallback to string
-                    return str(output)
-
-            # 3) older simple shape: {"candidates": ["..."]}
-            if 'candidates' in data and isinstance(data['candidates'][0], str):
-                return data['candidates'][0]
-
-        return "El tutor de IA no pudo generar una respuesta en este momento."
-    except Exception as e:
-        print("IA error:", e)
+    if response is None:
         return "El tutor de IA no está disponible en este momento. Intenta de nuevo más tarde."
+
+    if response.status_code != 200:
+        print(f"IA request failed ({modelo_probado}): {response.status_code} {response.text}")
+        return f"Error del tutor IA: {response.status_code} - {response.text}"
+
+    data = response.json()
+
+    if isinstance(data, dict):
+        if 'candidates' in data and isinstance(data['candidates'], list) and data['candidates']:
+            first = data['candidates'][0]
+            if isinstance(first, dict):
+                out = first.get('output') or first.get('content') or first.get('text')
+                if isinstance(out, str):
+                    return out
+                if isinstance(out, dict):
+                    return out.get('text', str(out))
+
+        if 'output' in data:
+            output = data['output']
+            if isinstance(output, dict):
+                content = output.get('content')
+                if isinstance(content, list):
+                    texts = [item.get('text', '') for item in content if isinstance(item, dict)]
+                    if texts:
+                        return ''.join(texts)
+                return str(output)
+
+        if 'candidates' in data and isinstance(data['candidates'][0], str):
+            return data['candidates'][0]
+
+    return "El tutor de IA no pudo generar una respuesta en este momento."
 
 
 # TELEGRAM → WEB
