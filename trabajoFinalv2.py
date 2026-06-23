@@ -14,81 +14,49 @@ import requests
 import asyncio
 import os
 
-
-
-# TELEGRAM
-
-
+# CONFIGURACIÓN DE VARIABLES DE ENTORNO
 tokenTelegram = os.getenv('TOKEN_TELEGRAM')
 chatID = os.getenv('CHAT_ID')
-gemini_api_key = os.getenv('GEMINI_API_KEY')
-gemini_model = os.getenv('GEMINI_MODEL', 'gemini-1.5-lite')
-# Hugging Face
 huggingface_api_token = os.getenv('HUGGINGFACE_API_TOKEN')
 huggingface_model = os.getenv('HUGGINGFACE_MODEL', 'google/flan-t5-small')
 
-# DEBUG: Print env vars on startup
+# DEBUG: Verificación de variables en el arranque
 print(f"[STARTUP DEBUG] TOKEN_TELEGRAM: {'✓' if tokenTelegram else 'MISSING'}")
 print(f"[STARTUP DEBUG] CHAT_ID: {'✓' if chatID else 'MISSING'}")
 print(f"[STARTUP DEBUG] HUGGINGFACE_API_TOKEN: {'✓' if huggingface_api_token else 'MISSING'}")
 print(f"[STARTUP DEBUG] HUGGINGFACE_MODEL: {huggingface_model if huggingface_model else 'MISSING'}")
-print(f"[STARTUP DEBUG] GEMINI_API_KEY: {'✓' if gemini_api_key else 'MISSING'}")
 
-#PALABRAS CLAVE DE ACTIVACION
-palabrasClave={
-    "ayuda":"/ayuda",
-    "emergencia":"/ayuda",
-    "urgente":"/ayuda",
-    "comprar":"/comprar",
-    "productos":"/producto",
-    "reserva":"/reserva"
+# PALABRAS CLAVE DE ACTIVACIÓN
+palabrasClave = {
+    "ayuda": "/ayuda",
+    "emergencia": "/ayuda",
+    "urgente": "/ayuda",
+    "comprar": "/comprar",
+    "productos": "/producto",
+    "reserva": "/reserva"
 }
 
-
-
-
-# APP
-
-
+# APLICACIÓN WEB Y WEBSOCKET
 app = Flask(__name__)
-
 socket = SocketIO(
     app,
     cors_allowed_origins="*",
     async_mode="threading"
 )
 
-
-
-# BOT TELEGRAM
-
-
-botTelegram = ApplicationBuilder().token(
-    tokenTelegram
-).build()
-
-
-
-
-
-
+# INICIALIZACIÓN DEL BOT DE TELEGRAM
+botTelegram = ApplicationBuilder().token(tokenTelegram).build()
 
 # INTERFAZ HTML
-
-
 @app.route("/")
 def index():
-
     return """
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
-
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Chat de Estudio Inteligente</title>
-
 <style>
 :root {
     color-scheme: dark;
@@ -104,18 +72,13 @@ def index():
     --danger: #c4303b;
     --border: rgba(27, 35, 48, 0.12);
 }
-
-* {
-    box-sizing: border-box;
-}
-
+* { box-sizing: border-box; }
 body {
     margin: 0;
     font-family: Inter, Arial, sans-serif;
     background: linear-gradient(180deg, #eef2f8 0%, #f7fbff 100%);
     color: var(--text);
 }
-
 .page {
     min-height: 100vh;
     display: flex;
@@ -123,7 +86,6 @@ body {
     justify-content: center;
     padding: 24px;
 }
-
 .panel {
     width: min(1080px, 100%);
     background: var(--panel);
@@ -132,19 +94,12 @@ body {
     overflow: hidden;
     border: 1px solid rgba(15, 61, 124, 0.08);
 }
-
 .header {
     background: #0f3d7c;
     color: white;
     padding: 30px 34px;
 }
-
-.header-title {
-    margin: 0;
-    font-size: 1.85rem;
-    letter-spacing: -0.02em;
-}
-
+.header-title { margin: 0; font-size: 1.85rem; letter-spacing: -0.02em; }
 .header-subtitle {
     margin: 10px 0 0;
     color: rgba(255, 255, 255, 0.82);
@@ -152,24 +107,9 @@ body {
     max-width: 620px;
     line-height: 1.6;
 }
-
-.body-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-}
-
-.chat-panel {
-    padding: 28px;
-}
-
-.status-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 22px;
-}
-
+.body-grid { display: grid; grid-template-columns: 1fr; }
+.chat-panel { padding: 28px; }
+.status-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 22px; }
 .status-card {
     width: 100%;
     border-radius: 16px;
@@ -180,11 +120,7 @@ body {
     justify-content: space-between;
     align-items: center;
 }
-
-.status-card strong {
-    color: var(--primary);
-}
-
+.status-card strong { color: var(--primary); }
 .chat-window {
     border-radius: 24px;
     background: var(--surface);
@@ -195,16 +131,7 @@ body {
     display: flex;
     flex-direction: column;
 }
-
-.chat-history {
-    padding: 24px;
-    overflow-y: auto;
-    gap: 14px;
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-}
-
+.chat-history { padding: 24px; overflow-y: auto; gap: 14px; display: flex; flex-direction: column; flex: 1; }
 .message {
     display: inline-flex;
     max-width: 80%;
@@ -215,61 +142,13 @@ body {
     border-radius: 18px;
     border: 1px solid transparent;
 }
-
-.message.user {
-    background: #ffffff;
-    color: var(--text);
-    align-self: flex-end;
-    border-color: rgba(15, 61, 124, 0.08);
-}
-
-.message.telegram {
-    background: #eef2ff;
-    color: var(--text);
-    border-color: rgba(0, 102, 204, 0.16);
-    align-self: flex-start;
-}
-
-.message.tutor {
-    background: #0f3d7c;
-    color: white;
-    border-color: rgba(255, 255, 255, 0.18);
-    align-self: flex-start;
-}
-
-.message.system {
-    background: #f5f7fb;
-    color: var(--muted);
-    border-radius: 14px;
-    align-self: center;
-    font-size: 0.95rem;
-}
-
-.message .badge {
-    display: inline-flex;
-    gap: 8px;
-    align-items: center;
-    margin-bottom: 10px;
-    font-size: 0.82rem;
-    opacity: 0.88;
-}
-
-.message .badge span {
-    display: inline-flex;
-}
-
-.input-area {
-    padding: 20px 24px 24px;
-    background: #f6f8fb;
-    border-top: 1px solid var(--border);
-}
-
-.input-row {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 12px;
-}
-
+.message.user { background: #ffffff; color: var(--text); align-self: flex-end; border-color: rgba(15, 61, 124, 0.08); }
+.message.telegram { background: #eef2ff; color: var(--text); border-color: rgba(0, 102, 204, 0.16); align-self: flex-start; }
+.message.tutor { background: #0f3d7c; color: white; border-color: rgba(255, 255, 255, 0.18); align-self: flex-start; }
+.message.system { background: #f5f7fb; color: var(--muted); border-radius: 14px; align-self: center; font-size: 0.95rem; }
+.message .badge { display: inline-flex; gap: 8px; align-items: center; margin-bottom: 10px; font-size: 0.82rem; opacity: 0.88; }
+.input-area { padding: 20px 24px 24px; background: #f6f8fb; border-top: 1px solid var(--border); }
+.input-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; }
 .input-row input {
     width: 100%;
     border: 1px solid rgba(15, 61, 124, 0.16);
@@ -279,7 +158,6 @@ body {
     background: white;
     color: var(--text);
 }
-
 .input-row button {
     border: none;
     border-radius: 16px;
@@ -290,50 +168,32 @@ body {
     cursor: pointer;
     transition: transform 0.2s ease, background 0.2s ease;
 }
-
-.input-row button:hover {
-    background: #004ea1;
-    transform: translateY(-1px);
-}
-
-.note {
-    margin-top: 16px;
-    color: var(--muted);
-    font-size: 0.92rem;
-}
-
+.input-row button:hover { background: #004ea1; transform: translateY(-1px); }
+.note { margin-top: 16px; color: var(--muted); font-size: 0.92rem; }
 @media (max-width: 720px) {
     .panel { border-radius: 18px; }
     .chat-window { min-height: 520px; }
 }
 </style>
-
 </head>
-
 <body>
-
 <div class="page">
     <section class="panel">
         <header class="header">
             <h1 class="header-title">Chat de Estudio Inteligente</h1>
-            <p class="header-subtitle">Asistente de estudio profesional para la web y Telegram. Usa <strong>/tutor</strong> para pedir explicaciones académicas formales al tutor.</p>
+            <p class="header-subtitle">Asistente de estudio profesional para la web y Telegram. Usa <strong>/tutor</strong> para pedir explicaciones académicas.</p>
         </header>
-
         <div class="body-grid">
             <div class="chat-panel">
                 <div class="status-bar">
                     <div class="status-card">
-                        <div>
-                            <strong>Modo Tutor:</strong> disponible para consultas académicas.
-                        </div>
+                        <div><strong>Modo Tutor:</strong> disponible para consultas académicas.</div>
                         <div id="statusText">Escribe /tutor seguido de tu pregunta.</div>
                     </div>
                 </div>
-
                 <div class="chat-window">
                     <div id="chat" class="chat-history"></div>
                 </div>
-
                 <div class="input-area">
                     <div class="input-row">
                         <input type="text" id="nombre" placeholder="Tu nombre" autocomplete="off" />
@@ -349,21 +209,14 @@ body {
         </div>
     </section>
 </div>
-
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script>
-
 var socket = io();
 var nombre = "";
 
 function guardarNombre() {
     let input = document.getElementById("nombre");
-
-    if (input.value.trim() == "") {
-        alert("Ingrese nombre");
-        return;
-    }
-
+    if (input.value.trim() == "") { alert("Ingrese nombre"); return; }
     nombre = input.value.trim();
     input.disabled = true;
     document.getElementById("btn-entrar").disabled = true;
@@ -373,15 +226,8 @@ function guardarNombre() {
 function enviar() {
     let input = document.getElementById("mensaje");
     let mensaje = input.value.trim();
-
-    if (nombre == "") {
-        alert("Ingrese nombre");
-        return;
-    }
-
-    if (mensaje == "") {
-        return;
-    }
+    if (nombre == "") { alert("Ingrese nombre"); return; }
+    if (mensaje == "") return;
 
     if (mensaje.toLowerCase().startsWith('/tutor')) {
         socket.emit('tutor_query', mensaje);
@@ -390,36 +236,19 @@ function enviar() {
     } else {
         socket.send(nombre + ': ' + mensaje);
     }
-
     input.value = "";
 }
 
-socket.on('message', function(msg) {
-    agregarChat(msg, 'user');
-});
-
-socket.on('telegram_message', function(msg) {
-    agregarChat('📲 ' + msg, 'telegram');
-});
-
-socket.on('emergencia', function(msg) {
-    agregarChat('🚨 ' + msg, 'telegram');
-});
-
-socket.on('tutor_status', function(msg) {
-    showTutorStatus(msg);
-});
-
-socket.on('tutor_response', function(msg) {
-    hideTutorStatus();
-    agregarChat('🤖 Tutor IA: ' + msg, 'tutor');
-});
+socket.on('message', function(msg) { agregarChat(msg, 'user'); });
+socket.on('telegram_message', function(msg) { agregarChat('📲 ' + msg, 'telegram'); });
+socket.on('emergencia', function(msg) { agregarChat('🚨 ' + msg, 'telegram'); });
+socket.on('tutor_status', function(msg) { showTutorStatus(msg); });
+socket.on('tutor_response', function(msg) { hideTutorStatus(); agregarChat('🤖 Tutor IA: ' + msg, 'tutor'); });
 
 function agregarChat(msg, tipo) {
     var chat = document.getElementById('chat');
     var div = document.createElement('div');
     div.className = 'message ' + (tipo || 'user');
-
     if (tipo === 'tutor') {
         div.innerHTML = '<div class="badge">🤖 <strong>Tutor IA</strong></div>' + msg;
     } else if (tipo === 'telegram') {
@@ -430,48 +259,25 @@ function agregarChat(msg, tipo) {
     } else {
         div.innerHTML = msg;
     }
-
     chat.appendChild(div);
     chat.scrollTop = chat.scrollHeight;
 }
-
-function agregarSistema(msg) {
-    agregarChat('<strong>Sistema:</strong> ' + msg, 'system');
-}
-
-function showTutorStatus(text) {
-    var status = document.getElementById('statusText');
-    status.textContent = text;
-}
-
-function hideTutorStatus() {
-    showTutorStatus('El tutor está listo para tu próxima consulta.');
-}
-
+function agregarSistema(msg) { agregarChat('<strong>Sistema:</strong> ' + msg, 'system'); }
+function showTutorStatus(text) { document.getElementById('statusText').textContent = text; }
+function hideTutorStatus() { showTutorStatus('El tutor está listo para tu próxima consulta.'); }
 </script>
-
 </body>
 </html>
 """
 
-
-
 @socket.on("message")
 def recibirMensaje(mensaje):
-
     print("WEB:", mensaje)
-
-    # Solo chat web
-    send(
-        mensaje,
-        broadcast=True
-    )
+    send(mensaje, broadcast=True)
     comandosDeteccion(mensaje)
-
 
 @socket.on('tutor_query')
 def recibirTutorQuery(texto):
-
     print('TUTOR QUERY:', texto)
     pregunta = texto[len('/tutor'):].strip()
 
@@ -484,77 +290,32 @@ def recibirTutorQuery(texto):
     socket.emit('tutor_response', respuesta)
     socket.emit('tutor_status', 'El tutor está listo para tu próxima consulta.')
 
-    enviarTelegram(
-        f"📘 Tutor IA\nPregunta: {pregunta}\nRespuesta: {respuesta}"
-    )
+    enviarTelegram(f"📘 Tutor IA\nPregunta: {pregunta}\nRespuesta: {respuesta}")
 
-
-#Paso Extra. COnectar los comandos de activacion
 def comandosDeteccion(mensaje):
-    texto=mensaje.lower()
-
+    texto = mensaje.lower()
     for palabra, comando in palabrasClave.items():
         if palabra in texto:
-            notificacion=f"""
-            REPORTE MENSAJE CHAT WEB
-
-            Comando:
-            {comando}
-
-            Palabra Detectada:
-            {mensaje}
-
-            Estado:
-            En revision...
-        """
-            socket.emit(
-                "ayuda",
-                notificacion
-            )
-            threading.Thread(
-                target=enviarTelegram,
-                args=(notificacion,),
-                daemon=True
-            ).start()
+            notificacion = f"\n            REPORTE MENSAJE CHAT WEB\n\n            Comando:\n            {comando}\n\n            Palabra Detectada:\n            {mensaje}\n\n            Estado:\n            En revision...\n        "
+            socket.emit("ayuda", notificacion)
+            threading.Thread(target=enviarTelegram, args=(notificacion,), daemon=True).start()
             print("Notificacion Enviada...")
             break
 
-
-
-
-# TELEGRAM SEND
-
-
+# ENVÍO DE MENSAJES A TELEGRAM
 def enviarTelegram(texto):
-
-    url = (
-        f"https://api.telegram.org/bot"
-        f"{tokenTelegram}/sendMessage"
-    )
-
-    data = {
-        "chat_id": chatID,
-        "text": texto
-    }
-
+    url = f"https://api.telegram.org/bot{tokenTelegram}/sendMessage"
+    data = {"chat_id": chatID, "text": texto}
     try:
-        requests.post(
-            url,
-            data=data,
-            timeout=10
-        )
+        requests.post(url, data=data, timeout=10)
     except Exception as e:
-        print(
-            "Telegram error:",
-            e
-        )
+        print("Telegram error:", e)
 
-
+# CONSULTA EXCLUSIVA A HUGGING FACE
 def consultar_tutor_ia(pregunta):
-    print(f"[DEBUG] consultar_tutor_ia called with: {pregunta[:50]}...")
-    print(f"[DEBUG] hf_token available: {bool(huggingface_api_token)}")
+    print(f"[DEBUG] consultar_tutor_ia llamado con: {pregunta[:50]}...")
+    print(f"[DEBUG] hf_token disponible: {bool(huggingface_api_token)}")
     print(f"[DEBUG] hf_model: {huggingface_model}")
-    print(f"[DEBUG] gemini_api_key available: {bool(gemini_api_key)}")
     
     prompt = (
         "Eres un Tutor Académico Formal y Profesional. "
@@ -563,210 +324,85 @@ def consultar_tutor_ia(pregunta):
         f"Consulta: {pregunta}"
     )
 
-    hf_token = huggingface_api_token
-    hf_model = huggingface_model
-    
-    # Intenta primero con Hugging Face si la variable existe
-    if hf_token:
-        print(f"[DEBUG] Attempting HF Inference with model: {hf_model}")
-        url = f"https://api-inference.huggingface.co/models/{hf_model}"
-        headers = {
-            "Authorization": f"Bearer {hf_token}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "inputs": prompt,
-            "parameters": {"max_new_tokens": 250, "temperature": 0.3}
-        }
-        try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=20)
-            print(f"[DEBUG] HF Response status: {resp.status_code}")
-            
-            if resp.status_code == 200:
-                data = resp.json()
-                if isinstance(data, list) and data:
-                    first = data[0]
-                    if isinstance(first, dict):
-                        return first.get('generated_text') or first.get('text') or str(first)
-                    return str(first)
-                if isinstance(data, dict):
-                    for key in ('generated_text', 'text', 'output'):
-                        if key in data and isinstance(data[key], str):
-                            return data[key]
-                    return str(data)
-                return str(data)
-            
-            # Si el modelo se está cargando (Error clásico 503 en HF Gratis)
-            elif resp.status_code == 503:
-                return "El tutor de IA (Hugging Face) se está iniciando en el servidor gratuito. Por favor, repite la pregunta en 15 segundos."
-            
-            # Si las credenciales fallan
-            elif resp.status_code == 401:
-                return "Error de autorización (401) en Hugging Face. Revisa que tu HUGGINGFACE_API_TOKEN en Render sea correcto."
-                
-            else:
-                return f"Hugging Face respondió con el error {resp.status_code}: {resp.text[:100]}"
-                
-        except Exception as e:
-            print(f"[DEBUG] HF error: {e}")
-            return f"Error de conexión con Hugging Face: {str(e)}"
-
-    # Si NO hay token de Hugging Face, se evalúa Gemini de respaldo
-    print(f"[DEBUG] Falling back to Gemini. Gemini key available: {bool(gemini_api_key)}")
-    if not gemini_api_key:
+    if not huggingface_api_token:
         return "El tutor de IA no está disponible. Falta configurar la variable HUGGINGFACE_API_TOKEN en Render."
 
-    endpoint = (
-        f"https://gemini.googleapis.com/v1/models/{gemini_model}:generateText"
-        f"?key={gemini_api_key}"
-    )
-
-    payload = {
-        "prompt": {
-            "text": prompt
-        },
-        "temperature": 0.2,
-        "maxOutputTokens": 420
+    url = f"https://api-inference.huggingface.co/models/{huggingface_model}"
+    headers = {
+        "Authorization": f"Bearer {huggingface_api_token}",
+        "Content-Type": "application/json"
     }
-
+    payload = {
+        "inputs": prompt,
+        "parameters": {"max_new_tokens": 250, "temperature": 0.3}
+    }
+    
     try:
-        response = requests.post(endpoint, json=payload, timeout=15)
-
-        if response.status_code != 200:
-            return f"Error del tutor IA (Gemini): {response.status_code} - {response.text[:100]}"
-
-        data = response.json()
-        if isinstance(data, dict):
-            if 'candidates' in data and data['candidates']:
-                candidate = data['candidates'][0]
-                if isinstance(candidate, dict):
-                    return candidate.get('output') or candidate.get('content', '') or str(candidate)
-            if 'output' in data:
-                output = data['output']
-                if isinstance(output, dict):
-                    content = output.get('content')
-                    if isinstance(content, list):
-                        return ''.join(item.get('text', '') for item in content if isinstance(item, dict))
-                    return str(content)
-                return str(output)
-
-        return "El tutor de IA no pudo generar una respuesta en este momento."
+        resp = requests.post(url, headers=headers, json=payload, timeout=20)
+        print(f"[DEBUG] HF Respuesta status: {resp.status_code}")
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list) and data:
+                first = data[0]
+                if isinstance(first, dict):
+                    return first.get('generated_text') or first.get('text') or str(first)
+                return str(first)
+            if isinstance(data, dict):
+                for key in ('generated_text', 'text', 'output'):
+                    if key in data and isinstance(data[key], str):
+                        return data[key]
+                return str(data)
+            return str(data)
+        
+        elif resp.status_code == 503:
+            return "El tutor de IA se está iniciando en el servidor gratuito de Hugging Face. Por favor, repite la pregunta en 15 segundos."
+        
+        elif resp.status_code == 401:
+            return "Error de autorización (401) en Hugging Face. Revisa tu HUGGINGFACE_API_TOKEN."
+            
+        else:
+            return f"Hugging Face respondió con error {resp.status_code}: {resp.text[:100]}"
+            
     except Exception as e:
-        print("IA error:", e)
-        return "El tutor de IA no está disponible en este momento. Intenta de nuevo más tarde."
+        print(f"[DEBUG] HF error: {e}")
+        return f"Error de conexión con Hugging Face: {str(e)}"
 
-
-# TELEGRAM → WEB
-
-
-async def recibirTelegram(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    usuario = (
-        update.message
-        .from_user
-        .first_name
-    )
-
+# RECEPCIÓN DESDE TELEGRAM → WEB
+async def recibirTelegram(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    usuario = update.message.from_user.first_name
     mensaje = update.message.text
+    texto = f"{usuario}: {mensaje}"
+    print("TELEGRAM:", texto)
+    socket.emit("telegram_message", texto)
 
-    texto = (
-        f"{usuario}: {mensaje}"
-    )
-
-    print(
-        "TELEGRAM:",
-        texto
-    )
-
-    socket.emit(
-        "telegram_message",
-        texto
-    )
-
-
-async def tutorTelegram(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
+async def tutorTelegram(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pregunta = ' '.join(context.args).strip()
     if not pregunta:
-        await update.message.reply_text(
-            "Usa /tutor seguido de tu consulta, por ejemplo: /tutor explica la fotosíntesis"
-        )
+        await update.message.reply_text("Usa /tutor seguido de tu consulta, por ejemplo: /tutor explica la fotosíntesis")
         return
 
-    await update.message.reply_text(
-        "El tutor de IA está analizando tu consulta..."
-    )
-
+    await update.message.reply_text("El tutor de IA está analizando tu consulta...")
     respuesta = consultar_tutor_ia(pregunta)
-
     await update.message.reply_text(respuesta)
-    socket.emit(
-        "tutor_response",
-        respuesta
-    )
-    enviarTelegram(
-        f"📘 Tutor IA\nPregunta: {pregunta}\nRespuesta: {respuesta}"
-    )
+    socket.emit("tutor_response", respuesta)
+    enviarTelegram(f"📘 Tutor IA\nPregunta: {pregunta}\nRespuesta: {respuesta}")
 
-
-# BOT
-
-
+# FUNCIÓN DEL HILO DEL BOT
 def iniciarBot():
-
-    asyncio.set_event_loop(
-        asyncio.new_event_loop()
-    )
-
-    botTelegram.add_handler(
-        CommandHandler(
-            'tutor',
-            tutorTelegram
-        )
-    )
-
-    botTelegram.add_handler(
-        MessageHandler(
-            filters.TEXT
-            &
-            ~filters.COMMAND,
-            recibirTelegram
-        )
-    )
-
-    print(
-        "BOT TELEGRAM ACTIVO"
-    )
-
-    # CORRECCIÓN AQUÍ: Evitamos que intente capturar señales del sistema operativo en el hilo secundario
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    botTelegram.add_handler(CommandHandler('tutor', tutorTelegram))
+    botTelegram.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, recibirTelegram))
+    print("BOT TELEGRAM ACTIVO")
     botTelegram.run_polling(stop_signals=None)
 
-
-
-# MAIN
-
+# EJECUCIÓN PRINCIPAL
 if __name__ == "__main__":
-
-    hiloBot = threading.Thread(
-        target=iniciarBot,
-        daemon=True
-    )
-
+    hiloBot = threading.Thread(target=iniciarBot, daemon=True)
     hiloBot.start()
-
-    print(
-        "Servidor iniciado"
-    )
+    print("Servidor iniciado")
 
     puerto = int(os.getenv('PORT', 5000))
-    
-    # CORRECCIÓN AQUÍ: Quitamos 'allow_unsafe_webkit' que provocaba el TypeError
     socket.run(
         app,
         host="0.0.0.0",
