@@ -541,12 +541,25 @@ def enviarTelegram(texto):
 
 
 def _consultar_modelo_gemini(modelo, payload):
-    endpoint = (
-        f"https://generativelanguage.googleapis.com/v1beta2/models/{modelo}:generateText"
-        f"?key={gemini_api_key}"
-    )
-    response = requests.post(endpoint, json=payload, timeout=20)
-    return response
+    versiones = ['v1beta2', 'v1']
+    for version in versiones:
+        endpoint = (
+            f"https://generativelanguage.googleapis.com/{version}/models/{modelo}:generateText"
+            f"?key={gemini_api_key}"
+        )
+        try:
+            response = requests.post(endpoint, json=payload, timeout=20)
+        except Exception as e:
+            print(f"IA request exception for model {modelo} at {version}:", e)
+            continue
+
+        if response.status_code == 404:
+            print(f"Modelo no encontrado en {version}: {modelo}")
+            continue
+
+        return response
+
+    return None
 
 
 def consultar_tutor_ia(pregunta):
@@ -572,14 +585,8 @@ def consultar_tutor_ia(pregunta):
     response = None
 
     for modelo in modelos:
-        try:
-            response = _consultar_modelo_gemini(modelo, payload)
-        except Exception as e:
-            print(f"IA request exception for model {modelo}:", e)
-            continue
-
-        if response.status_code == 404:
-            print(f"Modelo no encontrado: {modelo}")
+        response = _consultar_modelo_gemini(modelo, payload)
+        if response is None:
             continue
 
         modelo_probado = modelo
