@@ -361,14 +361,38 @@ def describir_modelo_huggingface(modelo):
 
 def extraer_texto_chat_completion(respuesta):
     try:
-        contenido = respuesta.choices[0].message.content
+        mensaje = respuesta.choices[0].message
     except Exception:
-        contenido = None
+        return str(respuesta)
+
+    contenido = getattr(mensaje, 'content', None)
 
     if isinstance(contenido, str) and contenido.strip():
         return contenido.strip()
 
-    return str(respuesta)
+    if isinstance(contenido, list):
+        partes = []
+        for parte in contenido:
+            if isinstance(parte, dict):
+                texto = parte.get('text') or parte.get('content')
+            else:
+                texto = getattr(parte, 'text', None) or getattr(parte, 'content', None)
+
+            if isinstance(texto, str) and texto.strip():
+                partes.append(texto.strip())
+
+        if partes:
+            return '\n'.join(partes)
+
+    razonamiento = getattr(mensaje, 'reasoning', None)
+    if isinstance(razonamiento, str) and razonamiento.strip():
+        print('[DEBUG] HF devolvio razonamiento interno sin respuesta final visible.')
+        return (
+            'El modelo generó razonamiento interno, pero no devolvió una respuesta final visible. '
+            'Intenta de nuevo o usa un modelo sin razonamiento.'
+        )
+
+    return 'No fue posible extraer una respuesta legible del tutor de IA.'
 
 def obtener_status_code_hf(error):
     response = getattr(error, 'response', None)
@@ -447,7 +471,8 @@ def consultar_tutor_ia(pregunta):
             'content': (
                 'Eres un Tutor Académico Formal y Profesional. '
                 'Responde siempre en español con claridad, precisión y tono ejecutivo. '
-                'Explica conceptos de forma estructurada y mantén la respuesta breve.'
+                'Explica conceptos de forma estructurada y mantén la respuesta breve. '
+                'No muestres razonamiento interno ni pasos de análisis; entrega solo la respuesta final.'
             )
         },
         {
@@ -463,8 +488,9 @@ def consultar_tutor_ia(pregunta):
             respuesta = client.chat_completion(
                 model=modelo,
                 messages=mensajes,
-                max_tokens=250,
+                max_tokens=400,
                 temperature=0.3,
+                reasoning_effort='none',
             )
             return extraer_texto_chat_completion(respuesta)
 
