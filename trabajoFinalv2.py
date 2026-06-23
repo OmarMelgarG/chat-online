@@ -27,6 +27,13 @@ gemini_model = os.getenv('GEMINI_MODEL', 'gemini-1.5-lite')
 huggingface_api_token = os.getenv('HUGGINGFACE_API_TOKEN')
 huggingface_model = os.getenv('HUGGINGFACE_MODEL', 'google/flan-t5-small')
 
+# DEBUG: Print env vars on startup
+print(f"[STARTUP DEBUG] TOKEN_TELEGRAM: {'✓' if tokenTelegram else 'MISSING'}")
+print(f"[STARTUP DEBUG] CHAT_ID: {'✓' if chatID else 'MISSING'}")
+print(f"[STARTUP DEBUG] HUGGINGFACE_API_TOKEN: {'✓' if huggingface_api_token else 'MISSING'}")
+print(f"[STARTUP DEBUG] HUGGINGFACE_MODEL: {huggingface_model if huggingface_model else 'MISSING'}")
+print(f"[STARTUP DEBUG] GEMINI_API_KEY: {'✓' if gemini_api_key else 'MISSING'}")
+
 #PALABRAS CLAVE DE ACTIVACION
 palabrasClave={
     "ayuda":"/ayuda",
@@ -544,6 +551,11 @@ def enviarTelegram(texto):
 
 
 def consultar_tutor_ia(pregunta):
+    print(f"[DEBUG] consultar_tutor_ia called with: {pregunta[:50]}...")
+    print(f"[DEBUG] hf_token available: {bool(huggingface_api_token)}")
+    print(f"[DEBUG] hf_model: {huggingface_model}")
+    print(f"[DEBUG] gemini_api_key available: {bool(gemini_api_key)}")
+    
     prompt = (
         "Eres un Tutor Académico Formal y Profesional. "
         "Responde en español con claridad, precisión y un tono ejecutivo. "
@@ -556,6 +568,7 @@ def consultar_tutor_ia(pregunta):
     hf_token = huggingface_api_token
     hf_model = huggingface_model
     if hf_token:
+        print(f"[DEBUG] Attempting HF Inference with model: {hf_model}")
         url = f"https://api-inference.huggingface.co/models/{hf_model}"
         headers = {
             "Authorization": f"Bearer {hf_token}",
@@ -567,6 +580,7 @@ def consultar_tutor_ia(pregunta):
         }
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=20)
+            print(f"[DEBUG] HF Response status: {resp.status_code}")
             if resp.status_code == 200:
                 try:
                     data = resp.json()
@@ -590,11 +604,12 @@ def consultar_tutor_ia(pregunta):
                 if isinstance(data, str):
                     return data
             else:
-                print(f"HF request failed: {resp.status_code} {resp.text}")
+                print(f"[DEBUG] HF request failed: {resp.status_code} {resp.text[:200]}")
         except Exception as e:
-            print("HF error:", e)
+            print(f"[DEBUG] HF error: {e}")
 
     # Fallback to Gemini if HF not available or failed
+    print(f"[DEBUG] Falling back to Gemini. Gemini key available: {bool(gemini_api_key)}")
     if not gemini_api_key:
         return "El tutor de IA no está disponible. Falta la variable de API (HUGGINGFACE_API_TOKEN o GEMINI_API_KEY)."
 
