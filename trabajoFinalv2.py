@@ -18,16 +18,28 @@ import time
 from huggingface_hub import InferenceClient
 from huggingface_hub.errors import HfHubHTTPError, InferenceTimeoutError
 
+def normalizar_modelo_huggingface(valor):
+    if not valor:
+        return None
+
+    modelo = valor.strip().strip('"').strip("'")
+    modelo = modelo.rstrip('.,;:')
+
+    if modelo.lower() in {'value', 'none', 'null', 'n/a', 'na', 'false'}:
+        return None
+
+    return modelo
+
 # CONFIGURACIÓN DE VARIABLES DE ENTORNO
 tokenTelegram = os.getenv('TOKEN_TELEGRAM')
 chatID = os.getenv('CHAT_ID')
 huggingface_api_token = os.getenv('HUGGINGFACE_API_TOKEN')
-huggingface_model = os.getenv('HUGGINGFACE_MODEL', 'Qwen/Qwen2.5-7B-Instruct-1M')
-huggingface_fallback_models = [
-    model.strip()
-    for model in os.getenv('HUGGINGFACE_FALLBACK_MODELS', '').split(',')
-    if model.strip()
-]
+huggingface_model = normalizar_modelo_huggingface(os.getenv('HUGGINGFACE_MODEL')) or 'Qwen/Qwen2.5-7B-Instruct-1M'
+huggingface_fallback_models = []
+for raw_model in os.getenv('HUGGINGFACE_FALLBACK_MODELS', '').split(','):
+    model = normalizar_modelo_huggingface(raw_model)
+    if model:
+        huggingface_fallback_models.append(model)
 huggingface_provider = os.getenv('HUGGINGFACE_PROVIDER', 'auto').lower()
 
 # DEBUG: Verificación de variables en el arranque
@@ -331,7 +343,6 @@ def obtener_modelos_huggingface():
     for model in huggingface_fallback_models:
         if model not in modelos:
             modelos.append(model)
-    modelos.append(None)
     return modelos
 
 def crear_cliente_huggingface():
@@ -456,7 +467,7 @@ def consultar_tutor_ia(pregunta):
         detalles = ' | '.join(errores_modelo[:2])
         return (
             'No encontré un modelo conversacional compatible en Hugging Face con la configuración actual. '
-            'Probé tus modelos configurados y el modelo recomendado automático de Hugging Face. '
+            'Revisa HUGGINGFACE_MODEL y HUGGINGFACE_FALLBACK_MODELS en Render. '
             f'Detalle: {detalles}'
         )
 
