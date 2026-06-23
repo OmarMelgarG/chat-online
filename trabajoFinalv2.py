@@ -338,14 +338,22 @@ def enviarTelegram(texto):
     except Exception as e:
         print("Telegram error:", e)
 
+def obtener_modelos_compatibles_huggingface():
+    return ['HuggingFaceBio/Carbon-3B']
+
 def obtener_modelos_huggingface():
     modelos = [huggingface_model]
     for model in huggingface_fallback_models:
         if model not in modelos:
             modelos.append(model)
+    for model in obtener_modelos_compatibles_huggingface():
+        if model not in modelos:
+            modelos.append(model)
     return modelos
 
 def crear_cliente_huggingface():
+    if huggingface_provider == 'auto':
+        return InferenceClient(api_key=huggingface_api_token, timeout=30)
     return InferenceClient(provider=huggingface_provider, api_key=huggingface_api_token, timeout=30)
 
 def describir_modelo_huggingface(modelo):
@@ -366,9 +374,25 @@ def obtener_status_code_hf(error):
     response = getattr(error, 'response', None)
     return getattr(response, 'status_code', None)
 
+def extraer_detalle_error_hf(error):
+    response = getattr(error, 'response', None)
+    if response is None:
+        return str(error)
+
+    try:
+        data = response.json()
+        if isinstance(data, dict):
+            if isinstance(data.get('error'), str):
+                return data['error']
+            return str(data)
+        return str(data)
+    except Exception:
+        text = getattr(response, 'text', '')
+        return text or str(error)
+
 def construir_mensaje_error_hf(error, modelo):
     status_code = obtener_status_code_hf(error)
-    detalle = str(error)
+    detalle = extraer_detalle_error_hf(error)
 
     if status_code == 401:
         return 'Error de autorización (401) en Hugging Face. Revisa tu HUGGINGFACE_API_TOKEN.'
@@ -395,7 +419,7 @@ def construir_mensaje_error_hf(error, modelo):
         return (
             'No encontré un modelo conversacional compatible en Hugging Face con la configuración actual. '
             f'Último intento: {describir_modelo_huggingface(modelo)}. '
-            'Prueba con un modelo de chat como Qwen/Qwen2.5-7B-Instruct-1M o deja que Hugging Face elija uno automáticamente.'
+            f'Detalle: {detalle[:160]}'
         )
 
     return f'Error de Hugging Face ({status_code if status_code else "sin código"}): {detalle[:180]}'
@@ -450,10 +474,11 @@ def consultar_tutor_ia(pregunta):
 
         except HfHubHTTPError as e:
             status_code = obtener_status_code_hf(e)
-            print(f"[DEBUG] HF HTTP error con {describir_modelo_huggingface(modelo)}: {status_code} - {e}")
+            detalle = extraer_detalle_error_hf(e)
+            print(f"[DEBUG] HF HTTP error con {describir_modelo_huggingface(modelo)}: {status_code} - {detalle}")
 
             if status_code in (400, 404):
-                errores_modelo.append(f"{describir_modelo_huggingface(modelo)}: {status_code}")
+                errores_modelo.append(f"{describir_modelo_huggingface(modelo)}: {status_code} - {detalle[:120]}")
                 continue
 
             return construir_mensaje_error_hf(e, modelo)
